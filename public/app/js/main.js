@@ -17,6 +17,7 @@ const NAV = [
   { href: '#/relatorios', label: 'Relatórios', icon: 'chart', perm: 'relatorios', page: 'relatorios' },
   { grp: 'Administração' },
   { href: '#/usuarios', label: 'Usuários', icon: 'user', perm: 'usuarios', page: 'usuarios' },
+  { href: '#/site', label: 'Editar site', icon: 'globe', perm: 'config', page: 'site' },
   { href: '#/config', label: 'Configurações', icon: 'cog', perm: 'config', page: 'config' },
 ];
 
@@ -41,6 +42,7 @@ const ROUTES = [
   [/^\/relatorios$/, 'relatorios', 'render'],
   [/^\/usuarios$/, 'usuarios', 'render'],
   [/^\/config$/, 'config', 'render'],
+  [/^\/site$/, 'site', 'render'],
 ];
 
 function layout() {
@@ -86,7 +88,7 @@ async function route() {
     const m = path.match(re);
     if (!m) continue;
     document.querySelectorAll('.side a[data-page]').forEach((a) => a.toggleAttribute('aria-current', false));
-    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', relatorios: 'relatorios', dashboard: 'dashboard' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
+    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', site: 'site', relatorios: 'relatorios', dashboard: 'dashboard' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
     const a = document.querySelector(`.side a[data-page="${navPage}"]`);
     if (a) a.setAttribute('aria-current', 'page');
     view.innerHTML = '<div class="empty">Carregando…</div>';

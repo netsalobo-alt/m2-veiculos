@@ -208,7 +208,7 @@ export async function detail(view, { id, params }) {
   if (params.tab) tabAtual = params.tab;
   const custo = can('custos');
   const capa = v.fotos[0];
-  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`]] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length})`]];
+  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`]] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length})`], ...(v.categoria !== 'bike' ? [['olx', 'OLX']] : [])];
   if (!tabs.find((t) => t[0] === tabAtual)) tabAtual = 'resumo';
 
   view.innerHTML = `<div class="ph"><div class="vhead">
@@ -229,7 +229,119 @@ export async function detail(view, { id, params }) {
   });
   const reload = () => detail(view, { id, params: {} });
   const tab = view.querySelector('#tab');
-  ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: tabDocs })[tabAtual](tab, v, reload);
+  ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: tabDocs, olx: tabOlx })[tabAtual](tab, v, reload);
+}
+
+// ------------------------------------------------------------------ OLX
+const OLX_ST = {
+  '': ['Não anunciado', ''], enviado: ['Enviado · aguardando a OLX', 'info'], pending: ['Em análise na OLX', 'info'], queued: ['Na fila da OLX', 'info'],
+  accepted: ['No ar na OLX', 'ok'], refused: ['Recusado pela OLX', 'bad'], error: ['Erro na OLX', 'bad'], erro: ['Erro ao enviar', 'bad'], deleted: ['Removido da OLX', ''],
+};
+// listas como [valor, texto] para manter a ordem (objetos com chaves numéricas reordenam)
+const SIMNAO = [['', '—'], ['1', 'Sim'], ['0', 'Não']];
+const CARTYPE = [['', '—'], ['9', 'Hatch'], ['8', 'Sedã'], ['5', 'SUV'], ['3', 'Pick-up'], ['7', 'Van / utilitário'], ['12', 'Perua'], ['11', 'Cupê'], ['2', 'Conversível'], ['6', 'Buggy'], ['10', 'Caminhão leve']];
+const MOTOTYPE = [['', '—'], ['1', 'Street'], ['2', 'Esportiva'], ['3', 'Custom'], ['4', 'Trail'], ['5', 'Naked'], ['6', 'Scooter'], ['7', 'Off-road'], ['8', 'Touring'], ['15', 'Adventure'], ['16', 'Enduro'], ['9', 'Utilitária'], ['17', 'Ciclomotor']];
+
+async function tabOlx(el, v, reload) {
+  el.innerHTML = '<div class="empty">Carregando…</div>';
+  const info = await get('/olx/veiculos/' + v.id);
+  const a = info.anuncio || {};
+  const op = a.opcoes || {};
+  const moto = v.categoria === 'moto';
+  const removido = !a.ativo && a.operacao === 'delete' && ['enviado', 'accepted', 'deleted'].includes(a.status);
+  const [stTxt, stCls] = removido ? ['Removido da OLX', ''] : OLX_ST[a.ativo || a.status ? a.status || '' : ''] || [a.status, ''];
+  const msgs = a.mensagens || [];
+  if (!info.conectado) {
+    el.innerHTML = `<div class="card"><h2>OLX</h2><p class="muted" style="margin:0">A conta da OLX ainda não está conectada. ${can('config') ? 'Vá em <a class="linkbtn" href="#/config">Configurações → OLX</a>, preencha as chaves enviadas pela OLX e clique em <strong>Conectar com a OLX</strong>.' : 'Peça a um administrador para conectar a conta em Configurações → OLX.'}</p>
+      ${info.problemas.length ? `<h3 style="margin:18px 0 8px;font-size:15px">O que também falta neste veículo</h3><ul style="margin:0;padding-left:20px;color:var(--muted)">${info.problemas.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="grid g-main">
+    <section class="card"><h2>Dados para a OLX</h2>
+      <p class="muted" style="margin:-6px 0 6px;font-size:13.5px">A OLX exige marca, modelo e versão do catálogo dela. O resto (preço, km, ano, cor, câmbio, fotos, descrição) vem do cadastro do veículo.</p>
+      <form id="fo" novalidate><div class="form-grid">
+        <label class="c4">Marca (OLX)<select name="marca_id" data-lvl="marca"><option value="">Carregando…</option></select></label>
+        <label class="c4">Modelo (OLX)<select name="modelo_id" data-lvl="modelo" disabled><option value="">—</option></select></label>
+        <label class="c4">Versão (OLX)<select name="versao_id" data-lvl="versao" disabled><option value="">—</option></select></label>
+        ${moto ? '<label class="c4">Cilindrada (OLX)<select name="cilindrada_id"><option value="">Carregando…</option></select></label>' : ''}
+        <div class="c12"><button type="button" class="btn sm ghost" id="sug">${icon('refresh')}Sugerir pelo cadastro</button> <span class="hint" id="sug-msg"></span></div>
+        <p class="form-sec">Informações extras (opcionais)</p>
+        ${moto ? selectField('Estilo da moto', 'mototype', MOTOTYPE, op.mototype ?? '', { cls: 'c3' }) : selectField('Carroceria', 'cartype', CARTYPE, op.cartype ?? '', { cls: 'c3' })}
+        ${selectField('Aceita troca', 'exchange', SIMNAO, op.exchange ?? '', { cls: 'c3' })}
+        ${selectField('Único dono', 'owner', SIMNAO, op.owner ?? '', { cls: 'c3' })}
+        ${selectField('IPVA pago', 'ipva_pago', SIMNAO, op.ipva_pago ?? '', { cls: 'c3' })}
+        ${selectField('Quitado', 'quitado', SIMNAO, op.quitado ?? '', { cls: 'c3' })}
+        ${moto ? '' : `${selectField('Chave reserva', 'extra_key', SIMNAO, op.extra_key ?? '', { cls: 'c3' })}${selectField('Manual do proprietário', 'owner_manual', SIMNAO, op.owner_manual ?? '', { cls: 'c3' })}
+        ${selectField('Revisões na concessionária', 'dealership_review', SIMNAO, op.dealership_review ?? '', { cls: 'c3' })}${selectField('Com garantia', 'warranty', SIMNAO, op.warranty ?? '', { cls: 'c3' })}`}
+      </div>
+      <div class="form-actions"><button type="button" class="btn ghost" id="so">Salvar</button><button type="submit" class="btn" ${v.status === 'vendido' ? 'disabled' : ''}>${a.ativo ? 'Salvar e atualizar na OLX' : 'Salvar e publicar na OLX'}</button></div></form>
+    </section>
+    <section class="stack">
+      <div class="card"><h2>Situação</h2>
+        <div class="kv"><span>Anúncio</span><strong>${pill(stTxt, stCls)}</strong></div>
+        ${a.url ? `<div class="kv"><span>Link</span><strong><a class="linkbtn" href="${esc(a.url)}" target="_blank" rel="noopener">Ver na OLX ↗</a></strong></div>` : ''}
+        ${a.enviado_em ? `<div class="kv"><span>Último envio</span><strong>${dth(a.enviado_em)}</strong></div>` : ''}
+        ${msgs.length ? `<div class="alert" style="margin-top:10px">${msgs.map((m) => `<div>${esc(m)}</div>`).join('')}</div>` : ''}
+        <div class="stack" style="gap:10px;margin-top:16px">
+          ${a.ad_id && (a.ativo || a.status) ? `<button class="btn ghost full" id="ost">${icon('refresh')}Atualizar situação</button>` : ''}
+          ${a.ativo ? '<button class="btn danger full" id="orm">Tirar da OLX</button>' : ''}
+        </div>
+        <p class="hint" style="margin-top:12px">Ao vender ou excluir o veículo, o anúncio sai da OLX sozinho. Ao editar os dados, ele é atualizado.</p></div>
+      <div class="card"><h2>Antes de publicar</h2>
+        <div id="chk">${info.problemas.length ? `<ul style="margin:0;padding-left:20px">${info.problemas.map((p) => `<li style="margin:4px 0">${esc(p)}</li>`).join('')}</ul>` : '<p style="margin:0;color:var(--ok);font-weight:650">✓ Tudo pronto para publicar.</p>'}</div>
+        <p class="hint" style="margin-top:10px">Título que vai para a OLX: <strong>${esc(info.previa.subject)}</strong> · ${info.previa.images.length} foto(s) · ${brl(info.previa.price)}</p></div>
+    </section></div>`;
+
+  const f = el.querySelector('#fo');
+  const selM = f.querySelector('[data-lvl=marca]'), selMo = f.querySelector('[data-lvl=modelo]'), selV = f.querySelector('[data-lvl=versao]');
+  const cat = moto ? 'moto' : 'carro';
+  const fill = (sel, list, val) => {
+    sel.innerHTML = `<option value="">Escolha…</option>${list.map((x) => `<option value="${esc(x.id)}" ${String(val) === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}`;
+    sel.disabled = false;
+  };
+  const loadModelos = async (marca, val) => { selMo.disabled = true; selV.disabled = true; selV.innerHTML = '<option value="">—</option>'; if (!marca) { selMo.innerHTML = '<option value="">—</option>'; return; } fill(selMo, await get(`/olx/catalogo/${cat}/${marca}`), val); };
+  const loadVersoes = async (marca, modelo, val) => { selV.disabled = true; if (!modelo) { selV.innerHTML = '<option value="">—</option>'; return; } fill(selV, await get(`/olx/catalogo/${cat}/${marca}/${modelo}`), val); };
+  const nome = (sel) => (sel.value ? sel.options[sel.selectedIndex].text : null);
+  const sugestao = async () => {
+    const m = el.querySelector('#sug-msg'); m.textContent = 'Procurando no catálogo da OLX…';
+    try {
+      const s = await get(`/olx/veiculos/${v.id}/sugestao`);
+      if (!s.marca_id) { m.textContent = 'Não encontrei a marca no catálogo. Escolha manualmente.'; return; }
+      selM.value = s.marca_id; await loadModelos(s.marca_id, s.modelo_id);
+      if (s.modelo_id) await loadVersoes(s.marca_id, s.modelo_id, s.versao_id);
+      m.textContent = s.versao_id ? 'Sugestão aplicada. Confira a versão antes de salvar.' : s.modelo_id ? 'Encontrei marca e modelo. Escolha a versão.' : 'Encontrei a marca. Escolha o modelo e a versão.';
+    } catch (e) { m.textContent = ''; fail(e); }
+  };
+  try {
+    fill(selM, await get(`/olx/catalogo/${cat}`), a.marca_id);
+    if (a.marca_id) await loadModelos(a.marca_id, a.modelo_id);
+    if (a.modelo_id) await loadVersoes(a.marca_id, a.modelo_id, a.versao_id);
+    if (moto) { const sc = f.querySelector('[name=cilindrada_id]'); const l = await get('/olx/cilindradas'); fill(sc, l, a.cilindrada_id); }
+    if (!a.marca_id) sugestao();
+  } catch (e) { fail(e); }
+  selM.onchange = () => loadModelos(selM.value).catch(fail);
+  selMo.onchange = () => loadVersoes(selM.value, selMo.value).catch(fail);
+  el.querySelector('#sug').onclick = sugestao;
+
+  const salvar = async () => {
+    const d = formData(f);
+    await put('/olx/veiculos/' + v.id, {
+      marca_id: d.marca_id, marca_nome: nome(selM), modelo_id: d.modelo_id, modelo_nome: nome(selMo), versao_id: d.versao_id, versao_nome: nome(selV), cilindrada_id: d.cilindrada_id,
+      opcoes: Object.fromEntries(['exchange', 'owner', 'extra_key', 'owner_manual', 'dealership_review', 'warranty', 'ipva_pago', 'quitado', 'cartype', 'mototype'].map((k) => [k, d[k] ?? ''])),
+    });
+  };
+  el.querySelector('#so').onclick = async () => { try { await salvar(); toast('Dados da OLX salvos.'); reload(); } catch (e) { fail(e); } };
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const b = f.querySelector('[type=submit]'); b.disabled = true; b.textContent = 'Enviando para a OLX…';
+    try { await salvar(); await post(`/olx/veiculos/${v.id}/publicar`); toast('Anúncio enviado para a OLX. A OLX analisa em alguns minutos.'); }
+    catch (err) { fail(err); }
+    reload();
+  };
+  const st = el.querySelector('#ost');
+  if (st) st.onclick = async () => { st.disabled = true; try { await post(`/olx/veiculos/${v.id}/status`); toast('Situação atualizada.'); } catch (e) { fail(e); } reload(); };
+  const rm = el.querySelector('#orm');
+  if (rm) rm.onclick = async () => { if (!(await confirmDlg('Tirar este anúncio da OLX?', 'Tirar da OLX'))) return; try { await post(`/olx/veiculos/${v.id}/remover`); toast('Pedido de remoção enviado à OLX.'); } catch (e) { fail(e); } reload(); };
 }
 
 function tabResumo(el, v, reload) {

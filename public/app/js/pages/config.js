@@ -1,9 +1,15 @@
-import { get, put, post, esc, toast, fail, field, selectField, areaField, modal } from '../core.js';
+import { get, put, post, esc, toast, fail, field, selectField, areaField, modal, confirmDlg } from '../core.js';
 import { setCrumbs } from '../main.js';
 
-export async function render(view) {
+const OLX_MSG = {
+  ok: ['Conta da OLX conectada com sucesso.', false], negado: ['A conexão foi cancelada na OLX.', true], invalido: ['A conexão com a OLX expirou. Clique em "Conectar com a OLX" de novo.', true],
+  falhou: ['A OLX não confirmou a conexão. Confira o Client ID e o Client Secret e tente de novo.', true], sem_chaves: ['Preencha e salve o Client ID e o Client Secret antes de conectar.', true],
+};
+
+export async function render(view, { params = {} } = {}) {
   setCrumbs('Configurações');
-  const s = await get('/config');
+  const [s, olx] = await Promise.all([get('/config'), get('/olx/status').catch(() => ({}))]);
+  if (OLX_MSG[params.olx]) { toast(...OLX_MSG[params.olx]); history.replaceState(null, '', '#/config'); }
   view.innerHTML = `<div class="ph"><div><p class="eyebrow">ADMINISTRAÇÃO</p><h1>Configurações</h1><p>Dados da loja (usados no site, contratos e recibos) e envio de e-mails.</p></div></div>
   <form id="f" novalidate class="stack">
     <section class="card"><h2>Dados da empresa</h2><div class="form-grid">
@@ -20,11 +26,33 @@ export async function render(view) {
       <div class="c3" style="display:flex;align-items:end"><button type="button" class="btn ghost full" id="teste">Enviar e-mail de teste</button></div></div></section>
     <section class="card"><h2>FIPE API (consulta por placa)</h2><p class="muted" style="margin:-6px 0 4px">Token da FIPE API (fipe.parallelum.com.br), usado no botão "Buscar placa" do cadastro de veículos. Placas já consultadas ficam guardadas e não gastam cota de novo.</p><div class="form-grid">
       ${field('Token de acesso', 'fipe_token', s.fipe_token, { type: 'password', cls: 'c8', attrs: 'autocomplete="off"', hint: s.fipe_token ? 'Token configurado. Para trocar, apague e cole o novo.' : 'Nenhum token configurado.' })}</div></section>
+    <section class="card" id="olx"><div class="card-h"><h2>OLX (anúncios automáticos)</h2>${olx.conectado ? '<span class="pill ok">Conectada</span>' : olx.configurado ? '<span class="pill warn">Não conectada</span>' : '<span class="pill">Não configurada</span>'}</div>
+      <p class="muted" style="margin:-6px 0 4px">Publica os veículos do estoque na OLX pela API oficial. Exige plano profissional na OLX e as chaves de integrador, que a OLX envia após o cadastro pelo e-mail <strong>suporteintegrador@olxbr.com</strong>.</p>
+      ${olx.conectado ? `<div class="alert" style="margin:10px 0;background:var(--ok-soft);color:var(--ok)">Conta conectada${olx.conta ? `: <strong>${esc(olx.conta)}</strong>` : ''}${olx.conectado_em ? ` · desde ${esc(olx.conectado_em.slice(8, 10) + '/' + olx.conectado_em.slice(5, 7) + '/' + olx.conectado_em.slice(0, 4))}` : ''}.</div>` : ''}
+      ${!olx.site_publico ? '<div class="alert" style="margin:10px 0">Para a OLX baixar as fotos, preencha acima o <strong>Endereço público do sistema</strong> (com https) quando o sistema estiver na internet.</div>' : ''}
+      <div class="form-grid">
+      ${field('Client ID', 'olx_client_id', s.olx_client_id, { cls: 'c6', attrs: 'autocomplete="off"' })}${field('Client Secret (chave de segurança)', 'olx_client_secret', s.olx_client_secret, { type: 'password', cls: 'c6', attrs: 'autocomplete="new-password"' })}
+      ${field('CEP dos anúncios', 'olx_cep', s.olx_cep, { cls: 'c3', attrs: 'inputmode="numeric" maxlength="9" placeholder="00000-000"', hint: 'Em branco, usa o CEP da empresa.' })}
+      ${field('Telefone dos anúncios', 'olx_telefone', s.olx_telefone, { cls: 'c3', attrs: 'inputmode="tel" placeholder="(11) 90000-0000"', hint: 'Em branco, usa o WhatsApp da loja.' })}
+      <div class="c6"><span style="display:block;font-weight:600;font-size:14px;margin:14px 0 6px">Endereço de retorno (informe à OLX no cadastro)</span>
+        <code style="display:block;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);word-break:break-all;font-size:13px">${esc(olx.redirect_uri || '')}</code></div>
+      <div class="c12" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+        <button type="button" class="btn" id="olx-con">${olx.conectado ? 'Reconectar com a OLX' : 'Conectar com a OLX'}</button>
+        ${olx.conectado ? '<button type="button" class="btn ghost" id="olx-des">Desconectar</button>' : ''}
+      </div></div></section>
     <div class="form-actions"><button class="btn" type="submit">Salvar configurações</button></div>
   </form>`;
   const f = view.querySelector('#f');
   const data = () => Object.fromEntries([...f.querySelectorAll('[name]')].map((e) => [e.name, e.value]));
   f.onsubmit = async (e) => { e.preventDefault(); try { await put('/config', data()); toast('Configurações salvas.'); } catch (err) { fail(err); } };
+  // salva as chaves e vai para o login oficial da OLX (que volta para /api/olx/retorno)
+  view.querySelector('#olx-con').onclick = async () => {
+    const d = data();
+    if (!d.olx_client_id || !d.olx_client_secret) { toast('Preencha o Client ID e o Client Secret enviados pela OLX.', true); return; }
+    try { await put('/config', d); location.href = '/api/olx/conectar'; } catch (err) { fail(err); }
+  };
+  const des = view.querySelector('#olx-des');
+  if (des) des.onclick = async () => { if (await confirmDlg('Desconectar a conta da OLX? Os anúncios já publicados continuam na OLX.', 'Desconectar')) { await post('/olx/desconectar'); toast('Conta da OLX desconectada.'); render(view, {}); } };
   view.querySelector('#teste').onclick = () => modal({
     title: 'Testar e-mail', body: field('Enviar para', 'to', s.email, { type: 'email' }), submitLabel: 'Enviar teste',
     onSubmit: async (d) => { await put('/config', data()); await post('/config/testar-email', d); toast('E-mail de teste enviado.'); },

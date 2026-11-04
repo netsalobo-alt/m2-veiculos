@@ -102,6 +102,7 @@ module.exports = function (api, can) {
       db.prepare("UPDATE leads SET status='convertido' WHERE veiculo_id=? AND status IN ('novo','em_contato')").run(v.id);
       return vid;
     })();
+    require('./routes-olx').aoVender(v.id); // tira o anúncio da OLX em segundo plano
     res.json({ id });
   });
 

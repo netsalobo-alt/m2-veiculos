@@ -7,6 +7,38 @@ const CATP = { carro: 'Carros', moto: 'Motos', bike: 'Bikes elétricas' };
 const view = document.getElementById('view');
 const st = { cat: '', q: '', ordem: 'recentes' };
 let veiculos = [], empresa = {};
+// conteúdo editável (vem de "Editar site" no sistema); o padrão abaixo é usado se a API falhar
+let site = {
+  aviso: { ativo: 0 }, cabecalho: {}, popup: { ativo: 0 }, rodape: {}, estoque: { titulo: 'Veículos disponíveis' },
+  destaque: { eyebrow: 'M2 SEMINOVOS', titulo: 'Seu próximo carro. Uma nova conquista.', subtitulo: 'Carros, motos e bikes elétricas seminovos, com atendimento próximo, claro e confiável. Escolha o seu e fale com a gente.', botao1_texto: 'Ver estoque', botao1_acao: 'estoque', botao2_texto: 'Venda seu veículo', botao2_acao: 'vender', mostrar_contadores: 1 },
+  secoes: ['promocoes', 'videos', 'estoque'], promocoes: { itens: [] }, videos: { itens: [] },
+};
+const cssUrl = (u) => String(u || '').replace(/['"()\\\s]/g, encodeURIComponent);
+// botão configurável: a ação vem do editor (estoque, contato, vender, whatsapp, link)
+function botao(texto, acao, url, cls = 'btn', msgWa = 'Olá! Vim pelo site da M2 Seminovos.') {
+  if (!texto || acao === 'nenhum') return '';
+  if (acao === 'estoque') return `<button class="${cls}" type="button" data-go="estoque">${esc(texto)}</button>`;
+  if (acao === 'contato' || acao === 'vender') return `<button class="${cls}" type="button" data-open="${acao}">${esc(texto)}</button>`;
+  if (acao === 'whatsapp') { const w = waLink(msgWa); return w ? `<a class="${cls}" href="${esc(w)}" target="_blank" rel="noopener">${esc(texto)}</a>` : `<button class="${cls}" type="button" data-open="contato">${esc(texto)}</button>`; }
+  if (acao === 'link' && url) { const ext = /^https?:/i.test(url); return `<a class="${cls}" href="${esc(url)}"${ext ? ' target="_blank" rel="noopener"' : ''}>${esc(texto)}</a>`; }
+  return '';
+}
+
+function secPromocoes() {
+  const it = site.promocoes.itens || [];
+  if (!it.length) return '';
+  return `<section class="wrap" id="promocoes"><div class="sec-h"><div><p class="eyebrow">OFERTAS</p><h2>${esc(site.promocoes.titulo || 'Promoções')}</h2>${site.promocoes.subtitulo ? `<p class="small" style="margin:6px 0 0">${esc(site.promocoes.subtitulo)}</p>` : ''}</div></div>
+    <div class="promos">${it.map((p) => `<article class="promo">
+      <div class="promo-img ${p.imagem ? '' : 'noimg'}" style="${p.imagem ? `background-image:url('${cssUrl(p.imagem)}')` : ''}">${p.selo ? `<span class="badge">${esc(p.selo)}</span>` : ''}</div>
+      <div class="promo-body"><h3>${esc(p.titulo)}</h3>${p.texto ? `<p>${esc(p.texto)}</p>` : ''}${p.fim ? `<p class="small">Válida até ${p.fim.split('-').reverse().join('/')}</p>` : ''}
+      ${botao(p.botao_texto, p.acao, p.url, 'btn', `Olá! Vi a promoção "${p.titulo}" no site da M2 Seminovos.`)}</div></article>`).join('')}</div></section>`;
+}
+function secVideos() {
+  const it = site.videos.itens || [];
+  if (!it.length) return '';
+  return `<section class="wrap" id="videos"><div class="sec-h"><div><p class="eyebrow">VÍDEOS</p><h2>${esc(site.videos.titulo || 'Vídeos')}</h2>${site.videos.subtitulo ? `<p class="small" style="margin:6px 0 0">${esc(site.videos.subtitulo)}</p>` : ''}</div></div>
+    <div class="videos">${it.map((v) => `<figure class="video"><div class="video-frame"><iframe src="${esc(v.embed)}" title="${esc(v.titulo || 'Vídeo')}" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>${v.titulo ? `<figcaption>${esc(v.titulo)}</figcaption>` : ''}</figure>`).join('')}</div></section>`;
+}
 
 const preco = (v) => (v.preco_venda > 0 ? brl(v.preco_venda) : 'Consulte condições');
 const titulo = (v) => [v.marca, v.modelo, v.versao].filter(Boolean).join(' ');
@@ -40,13 +72,18 @@ function lista() {
 function home() {
   document.title = 'M2 Seminovos · Carros, motos e bikes elétricas seminovos';
   const cnt = (c) => veiculos.filter((v) => v.categoria === c).length;
+  const h = site.destaque;
+  const secs = { promocoes: secPromocoes(), videos: secVideos(), estoque: '<!--estoque-->' };
+  const ordem = (site.secoes || ['promocoes', 'videos', 'estoque']).map((s) => secs[s] || '').join('');
+  const [antes, depois] = ordem.split('<!--estoque-->');
   view.innerHTML = `<section class="hero"><div class="wrap hero-grid"><div>
-      <p class="eyebrow">M2 SEMINOVOS</p><h1>Seu próximo carro. Uma nova conquista.</h1>
-      <p class="lead">Carros, motos e bikes elétricas seminovos, com atendimento próximo, claro e confiável. Escolha o seu e fale com a gente.</p>
-      <div class="hero-actions"><button class="btn" type="button" data-go="estoque">Ver estoque</button><button class="btn outline" type="button" data-open="vender">Venda seu veículo</button></div>
-      <div class="facts"><div><strong>${cnt('carro')}</strong><span>carros</span></div><div><strong>${cnt('moto')}</strong><span>motos</span></div><div><strong>${cnt('bike')}</strong><span>bikes elétricas</span></div></div>
-    </div><div class="hero-art" aria-hidden="true"><img src="/assets/m2-logo.svg" alt=""></div></div></section>
-  <section class="wrap" id="estoque"><div class="sec-h"><div><p class="eyebrow">ESTOQUE</p><h2>Veículos disponíveis</h2></div><span class="small" id="qtd"></span></div>
+      ${h.eyebrow ? `<p class="eyebrow">${esc(h.eyebrow)}</p>` : ''}<h1>${esc(h.titulo)}</h1>
+      ${h.subtitulo ? `<p class="lead">${esc(h.subtitulo)}</p>` : ''}
+      <div class="hero-actions">${botao(h.botao1_texto, h.botao1_acao, h.botao1_url, 'btn')}${botao(h.botao2_texto, h.botao2_acao, h.botao2_url, 'btn outline')}</div>
+      ${h.mostrar_contadores ? `<div class="facts"><div><strong>${cnt('carro')}</strong><span>carros</span></div><div><strong>${cnt('moto')}</strong><span>motos</span></div><div><strong>${cnt('bike')}</strong><span>bikes elétricas</span></div></div>` : ''}
+    </div>${h.imagem ? `<div class="hero-art hero-foto" style="background-image:url('${cssUrl(h.imagem)}')" role="img" aria-label="${esc(h.titulo)}"></div>` : '<div class="hero-art" aria-hidden="true"><img src="/assets/m2-logo.svg" alt=""></div>'}</div></section>
+  ${antes || ''}
+  <section class="wrap" id="estoque"><div class="sec-h"><div><p class="eyebrow">ESTOQUE</p><h2>${esc(site.estoque.titulo || 'Veículos disponíveis')}</h2></div><span class="small" id="qtd"></span></div>
     <div class="toolbar" style="margin-bottom:20px">
       <div class="chips" role="group" aria-label="Categoria">${[['', 'Todos'], ...Object.entries(CATP)].map(([k, l]) => `<button type="button" class="chip" data-chip="${k}" aria-pressed="${st.cat === k}">${l}</button>`).join('')}</div>
       <input type="search" id="busca" placeholder="Buscar marca ou modelo" value="${esc(st.q)}" aria-label="Buscar marca ou modelo">
@@ -54,7 +91,8 @@ function home() {
     </div>
     <div class="cards" id="cards"></div>
     <div class="empty-s" id="vazio" hidden>Nenhum veículo encontrado com esses filtros. <button class="linkbtn" type="button" data-open="contato" style="background:none;border:0;text-decoration:underline;font-weight:600">Conte o que você procura</button> e avisamos quando chegar.</div>
-  </section>`;
+  </section>
+  ${depois || ''}`;
   document.getElementById('ordem').value = st.ordem;
   view.querySelectorAll('[data-chip]').forEach((b) => (b.onclick = () => { st.cat = b.dataset.chip; view.querySelectorAll('[data-chip]').forEach((x) => x.setAttribute('aria-pressed', x === b)); lista(); }));
   document.getElementById('busca').oninput = (e) => { st.q = e.target.value; lista(); };
@@ -162,6 +200,53 @@ document.querySelectorAll('dialog .close').forEach((b) => (b.onclick = () => b.c
 const mt = document.getElementById('mt');
 mt.onclick = () => { const l = document.getElementById('links'); l.classList.toggle('open'); mt.setAttribute('aria-expanded', l.classList.contains('open')); };
 
+// aplica aviso, cabeçalho, rodapé e pop-up configurados no sistema
+function aplicarSite() {
+  const a = site.aviso || {};
+  const bar = document.getElementById('aviso');
+  if (a.ativo && a.texto) {
+    const cls = `aviso-bar aviso-${['dourado', 'preto', 'vermelho', 'verde'].includes(a.cor) ? a.cor : 'dourado'}`;
+    bar.className = cls;
+    const link = botao(a.texto, a.acao === 'nenhum' ? '' : a.acao, a.url, 'aviso-link');
+    bar.innerHTML = `<div class="wrap">${link || `<span>${esc(a.texto)}</span>`}</div>`;
+    bar.hidden = false;
+  }
+  const c = site.cabecalho || {};
+  if (c.logo) document.getElementById('logo-topo').src = c.logo;
+  if (c.botao_texto) document.getElementById('btn-topo').textContent = c.botao_texto;
+  const r = site.rodape || {};
+  if (r.banner_titulo) document.getElementById('banner-tit').textContent = r.banner_titulo;
+  if (r.aviso_legal) document.getElementById('aviso-legal').textContent = r.aviso_legal;
+  popup();
+}
+
+function popup() {
+  const p = site.popup || {};
+  const forcar = new URLSearchParams(location.search).has('popup');
+  if (!p.ativo && !forcar) return;
+  if (!p.titulo && !p.texto && !p.imagem) return;
+  // a "assinatura" muda quando o conteúdo muda: um pop-up novo volta a aparecer
+  const chave = 'm2-popup-' + Array.from(JSON.stringify([p.titulo, p.texto, p.imagem])).reduce((h, ch) => ((h * 31 + ch.charCodeAt(0)) | 0), 7);
+  const hojeStr = new Date().toISOString().slice(0, 10);
+  if (!forcar) {
+    try {
+      if (p.frequencia === 'sessao' && sessionStorage.getItem(chave)) return;
+      if (p.frequencia === 'dia' && localStorage.getItem(chave) === hojeStr) return;
+    } catch (e) { /* navegador sem armazenamento: mostra normalmente */ }
+  }
+  const d = document.getElementById('dlg-popup');
+  document.getElementById('pp-t').textContent = p.titulo || '';
+  document.getElementById('pp-body').innerHTML = `${p.imagem ? `<img class="popup-img" src="${esc(p.imagem)}" alt="">` : ''}${p.texto ? `<p style="white-space:pre-line">${esc(p.texto)}</p>` : ''}
+    ${botao(p.botao_texto, p.acao, p.url, 'btn full', `Olá! Vi a oferta "${p.titulo || ''}" no site da M2 Seminovos.`)}`;
+  // fecha o pop-up antes de abrir outro diálogo (contato, vender) ou seguir um link
+  d.querySelectorAll('#pp-body [data-open],#pp-body [data-go],#pp-body a').forEach((el) => el.addEventListener('click', () => d.close()));
+  setTimeout(() => {
+    if (document.querySelector('dialog[open]')) return; // não atrapalha quem já abriu outro formulário
+    d.showModal();
+    try { sessionStorage.setItem(chave, '1'); localStorage.setItem(chave, hojeStr); } catch (e) { /* ignora */ }
+  }, forcar ? 300 : Math.max(0, Number(p.atraso) || 0) * 1000);
+}
+
 function route() {
   const m = location.hash.match(/^#\/veiculo\/(\d+)/);
   if (m) detalhe(m[1]); else home();
@@ -173,7 +258,9 @@ window.addEventListener('hashchange', route);
   try {
     [veiculos, empresa] = await Promise.all([fetch('/api/public/veiculos').then((r) => r.json()), fetch('/api/public/empresa').then((r) => r.json())]);
   } catch (e) { veiculos = []; }
-  document.getElementById('sobre-txt').textContent = empresa.sobre || '';
+  try { const r = await fetch('/api/public/site'); if (r.ok) site = { ...site, ...(await r.json()) }; } catch (e) { /* usa o padrão */ }
+  aplicarSite();
+  document.getElementById('sobre-txt').textContent = (site.rodape && site.rodape.banner_texto) || empresa.sobre || '';
   document.getElementById('foot-info').innerHTML = [empresa.endereco && `${esc(empresa.endereco)}${empresa.cidade ? ' – ' + esc(empresa.cidade) + (empresa.uf ? '/' + esc(empresa.uf) : '') : ''}`, [empresa.telefone, empresa.email].filter(Boolean).map(esc).join(' · '), esc(empresa.horario || '')].filter(Boolean).join('<br>');
   route();
 })();
