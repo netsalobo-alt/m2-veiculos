@@ -13,9 +13,10 @@
 <link rel="stylesheet" href="/site/site.css">
 </head>
 <body>
+<div class="aviso-bar" id="aviso" hidden></div>
 <header class="header" id="topo">
   <div class="wrap nav">
-    <a class="brand" href="#/" aria-label="M2 Seminovos — início"><img src="/assets/m2-logo-selo.svg" alt="M2 Seminovos"></a>
+    <a class="brand" href="#/" aria-label="M2 Seminovos — início"><img id="logo-topo" src="/assets/m2-logo-selo.svg" alt="M2 Seminovos"></a>
     <button class="menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" id="mt">☰</button>
     <nav class="links" aria-label="Principal" id="links">
       <button type="button" data-go="estoque">Estoque</button>
@@ -26,7 +27,7 @@
       <button type="button" data-go="sobre">Sobre a M2</button>
       <a class="area" href="/login">Área restrita</a>
     </nav>
-    <button class="btn black" type="button" data-open="contato">Fale com a M2</button>
+    <button class="btn black" type="button" data-open="contato" id="btn-topo">Fale com a M2</button>
   </div>
 </header>
 
@@ -34,14 +35,14 @@
 
 <div class="wrap">
   <section class="banner" id="sobre">
-    <div><h2>Seu próximo carro começa com uma conversa.</h2><p class="banner-sub" id="sobre-txt"></p></div>
+    <div><h2 id="banner-tit">Seu próximo carro começa com uma conversa.</h2><p class="banner-sub" id="sobre-txt"></p></div>
     <button class="btn" type="button" data-open="contato">Fale com a M2</button>
   </section>
   <footer class="footer">
     <div><div class="wordmark">M2 SEMINOVOS</div><p class="small foot-info" id="foot-info"></p></div>
     <div class="footer-links"><button type="button" data-go="estoque">Estoque</button><button type="button" data-open="vender">Venda seu veículo</button><a href="/login">Área restrita</a></div>
   </footer>
-  <p class="notice">Preços, disponibilidade e condições sob consulta e sujeitos a alteração sem aviso. Imagens dos veículos podem ser ilustrativas.</p>
+  <p class="notice" id="aviso-legal">Preços, disponibilidade e condições sob consulta e sujeitos a alteração sem aviso. Imagens dos veículos podem ser ilustrativas.</p>
 </div>
 
 <dialog id="dlg-contato" aria-labelledby="dc-t">
@@ -70,6 +71,11 @@
     <button class="btn full" type="submit">Solicitar avaliação</button>
     <p class="status" role="status"></p>
   </form>
+</dialog>
+
+<dialog class="popup" id="dlg-popup" aria-labelledby="pp-t">
+  <div class="dialog-top"><h2 id="pp-t"></h2><button class="close" type="button" aria-label="Fechar">×</button></div>
+  <div id="pp-body"></div>
 </dialog>
 
 <dialog class="lightbox" id="dlg-foto" aria-label="Foto ampliada">

@@ -36,3 +36,29 @@ select{font:inherit;border:1px solid var(--input-border);border-radius:var(--rad
 @media(max-width:900px){.hero-grid{grid-template-columns:1fr}.hero-art{display:none}.hero{padding:32px 0 24px}}
 @media(max-width:760px){.links a.area{min-height:44px;display:flex;align-items:center}.toolbar input[type=search]{min-width:0;width:100%}.facts{grid-template-columns:repeat(3,1fr)}.facts strong{font-size:18px}}
 .footer-links a{font-size:12px;padding:8px}
+/* ---- conteúdo editável pelo sistema (Editar site) ---- */
+.aviso-bar{font-size:14px;font-weight:600;text-align:center;padding:9px 0;line-height:1.35}
+.aviso-bar .wrap{display:flex;justify-content:center}
+.aviso-bar .aviso-link{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.aviso-dourado{background:var(--gold);color:var(--ink)}
+.aviso-preto{background:var(--ink);color:#fff}
+.aviso-vermelho{background:#b42318;color:#fff}
+.aviso-verde{background:#1f7a4d;color:#fff}
+.hero-foto{background-size:cover;background-position:center;padding:0}
+.hero-foto:before{display:none}
+.promos{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;margin-bottom:40px}
+.promo{background:var(--surface);border:1px solid var(--line-card);border-radius:var(--radius-16);overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow-card)}
+.promo-img{aspect-ratio:3/2;background-size:cover;background-position:center;position:relative}
+.promo-img .badge{position:absolute;top:12px;left:12px}
+.promo-body{padding:18px 20px 20px;display:flex;flex-direction:column;gap:8px;flex:1}
+.promo-body h3{margin:0;font-size:19px;letter-spacing:-.02em}
+.promo-body p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55}
+.promo-body .btn{margin-top:auto;align-self:flex-start}
+.videos{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px;margin-bottom:40px}
+.video{margin:0}
+.video-frame{position:relative;aspect-ratio:16/9;border-radius:var(--radius-16);overflow:hidden;background:#000}
+.video-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.video figcaption{margin-top:10px;font-weight:600}
+dialog.popup{max-width:520px}
+.popup-img{width:100%;max-height:60vh;object-fit:contain;border-radius:var(--radius-10);display:block;margin:0 0 14px;background:var(--photo-bg)}
+@media(max-width:760px){.videos{grid-template-columns:1fr}.aviso-bar{font-size:13px;padding:8px 12px}}

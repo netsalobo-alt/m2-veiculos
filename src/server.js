@@ -73,6 +73,7 @@ app.get('/api/public/empresa', (req, res) => {
   const s = getSettings();
   res.json({ nome: s.empresa_nome, telefone: s.telefone, whatsapp: s.whatsapp, email: s.email, endereco: s.endereco, cidade: s.cidade, uf: s.uf, horario: s.horario, sobre: s.sobre, cnpj: s.cnpj });
 });
+require('./routes-site').publico(app);
 app.get('/api/public/veiculos', (req, res) => {
   const rows = db.prepare(`SELECT ${PUBLIC_FIELDS} FROM veiculos v WHERE v.publicado=1 AND v.status IN ('disponivel','reservado') ORDER BY v.destaque DESC, v.data_entrada DESC, v.id DESC`).all();
   res.json(rows.map((r) => ({ ...r, fotos: fotosDe(r.id) })));
@@ -135,6 +136,8 @@ require('./routes-cadastros')(api, can);
 require('./routes-estoque')(api, can);
 require('./routes-vendas')(api, can);
 require('./routes-financeiro')(api, can);
+require('./routes-site')(api, can);
+require('./routes-olx')(api, can);
 app.use('/api', api);
 
 // erros

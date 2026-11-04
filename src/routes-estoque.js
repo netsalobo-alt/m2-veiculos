@@ -136,12 +136,14 @@ module.exports = function (api, can) {
       if (req.user.perms.includes('custos')) syncCompraLancamento(v, req.user.id);
     });
     tx();
+    require('./routes-olx').aoEditar(Number(req.params.id)); // atualiza o anúncio na OLX, se estiver anunciado
     res.json({ ok: true });
   });
 
   api.delete('/veiculos/:id', can('custos'), (req, res) => {
     if (db.prepare('SELECT 1 FROM vendas WHERE veiculo_id=? OR veiculo_troca_id=?').get(req.params.id, req.params.id)) throw bad('Veículo com venda registrada não pode ser excluído.');
     const fotos = db.prepare('SELECT arquivo FROM veiculo_fotos WHERE veiculo_id=?').all(req.params.id);
+    require('./routes-olx').aoExcluir(Number(req.params.id)); // tira da OLX antes de apagar
     db.transaction(() => {
       db.prepare('DELETE FROM lancamentos WHERE veiculo_id=? AND venda_id IS NULL').run(req.params.id);
       db.prepare('DELETE FROM veiculos WHERE id=?').run(req.params.id);

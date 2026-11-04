@@ -80,13 +80,16 @@ module.exports = function (api, can) {
     const s = getSettings();
     s.smtp_pass = s.smtp_pass ? '********' : '';
     s.fipe_token = s.fipe_token ? '********' : '';
+    s.olx_client_secret = s.olx_client_secret ? '********' : '';
+    delete s.olx_access_token; // nunca sai do servidor
     res.json(s);
   });
   api.put('/config', can('config'), (req, res) => {
     const up = db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
     const tx = db.transaction((o) => {
       for (const [k, v] of Object.entries(o)) {
-        if ((k === 'smtp_pass' || k === 'fipe_token') && v === '********') continue;
+        if ((k === 'smtp_pass' || k === 'fipe_token' || k === 'olx_client_secret') && v === '********') continue;
+        if (['olx_access_token', 'olx_conta', 'olx_conectado_em', 'site_conteudo'].includes(k)) continue; // gravados só pelo próprio sistema
         up.run(k, v == null ? '' : String(v));
       }
     });
