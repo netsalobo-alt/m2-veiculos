@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Assinatura de documento · M2 Seminovos</title>
+<link rel="icon" href="/assets/m2-favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;650;700;750&display=swap">
+<link rel="stylesheet" href="/assets/tokens.css">
+<link rel="stylesheet" href="/assets/m2.css">
+<link rel="stylesheet" href="/assets/app.css">
+<style>
+body{background:var(--bg)}
+.top{position:static;justify-content:space-between}
+.top img{height:38px;display:block}
+.wrap2{max-width:860px;margin:0 auto;padding:28px 16px 60px}
+.doc-preview{max-width:none}
+.sign{margin-top:22px}
+canvas{width:100%;height:200px;border:1px dashed var(--input-border);border-radius:var(--radius-10);background:#fff;touch-action:none;display:block;margin-top:7px}
+.done{text-align:center;padding:40px 20px}
+</style>
+</head>
+<body>
+<header class="top"><img src="/assets/m2-logo-selo.svg" alt="M2 Seminovos"><span class="muted" style="font-size:13px">Assinatura eletrônica</span></header>
+<main class="wrap2" id="app"><div class="empty">Carregando documento…</div></main>
+<script type="module">
+import { docHtml } from '/app/js/dochtml.js';
+const token = location.pathname.split('/').pop();
+const app = document.getElementById('app');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function load() {
+  const r = await fetch('/api/public/assinatura/' + token);
+  const d = await r.json();
+  if (!r.ok) { app.innerHTML = `<div class="card done"><h1 class="title-lg">Link indisponível</h1><p class="muted">${esc(d.error)}</p></div>`; return; }
+  document.title = d.titulo + ' · M2 Seminovos';
+  const pdf = `/api/public/assinatura/${token}/pdf`;
+  if (d.assinado_em) {
+    app.innerHTML = `<div class="card done"><p class="eyebrow">DOCUMENTO ASSINADO</p><h1 class="title-lg">${esc(d.titulo)}</h1>
+      <p class="muted">Assinado por ${esc(d.assinatura_nome)} em ${esc(d.assinado_em.slice(8,10) + '/' + d.assinado_em.slice(5,7) + '/' + d.assinado_em.slice(0,4))}.</p>
+      <a class="btn black" href="${pdf}" target="_blank" rel="noopener">Baixar PDF assinado</a></div>`;
+    return;
+  }
+  const s = d.signatario || {};
+  app.innerHTML = `<p class="eyebrow">${esc(d.empresa.toUpperCase())}</p><h1 class="title-lg" style="margin:0 0 6px">${esc(d.titulo)}</h1>
+    <p class="muted" style="margin:0 0 18px">Leia o documento com atenção. No final, informe seus dados e assine no quadro. <a class="linkbtn" href="${pdf}" target="_blank" rel="noopener">Abrir em PDF</a></p>
+    <div class="doc-preview">${docHtml(d.conteudo)}</div>
+    <form class="card sign" id="f" novalidate><h2 class="title-md" style="font-size:21px">Assinar</h2>
+      <div class="form-grid"><label class="c8">Nome completo<input name="nome" required value="${esc(s.nome || '')}" autocomplete="name"></label>
+      <label class="c4">CPF / CNPJ<input name="documento" required inputmode="numeric" value="${esc(s.cpf_cnpj || '')}"></label></div>
+      <label>Sua assinatura<canvas id="c" aria-label="Quadro para desenhar a assinatura"></canvas></label>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px"><span class="small">Desenhe com o dedo ou o mouse.</span><button type="button" class="btn sm ghost" id="limpar">Limpar</button></div>
+      <label class="check"><input type="checkbox" name="aceite"> Li e concordo com o documento acima e reconheço esta assinatura eletrônica como válida.</label>
+      <p class="small" style="margin:10px 0 0">Registramos data, hora, endereço IP e um código de verificação (hash) do conteúdo para garantir a integridade do documento.</p>
+      <p id="err" class="neg" role="alert" style="min-height:18px;margin:10px 0 0"></p>
+      <button class="btn black full" type="submit">Assinar documento</button></form>`;
+  const c = document.getElementById('c');
+  const ctx = c.getContext('2d');
+  let drawing = false, strokes = 0;
+  const size = () => { const r = c.getBoundingClientRect(); c.width = r.width * 2; c.height = r.height * 2; ctx.scale(2, 2); ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; strokes = 0; };
+  size();
+  const pos = (e) => { const r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  c.onpointerdown = (e) => { drawing = true; c.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.moveTo(...pos(e)); };
+  c.onpointermove = (e) => { if (!drawing) return; ctx.lineTo(...pos(e)); ctx.stroke(); strokes++; };
+  c.onpointerup = c.onpointercancel = () => { drawing = false; };
+  document.getElementById('limpar').onclick = () => { ctx.clearRect(0, 0, c.width, c.height); strokes = 0; };
+  document.getElementById('f').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, err = document.getElementById('err');
+    err.textContent = '';
+    if (strokes < 8) { err.textContent = 'Desenhe sua assinatura no quadro.'; return; }
+    if (!f.aceite.checked) { err.textContent = 'Marque a caixa de concordância para assinar.'; return; }
+    const btn = f.querySelector('[type=submit]'); btn.disabled = true;
+    const r = await fetch('/api/public/assinatura/' + token, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nome: f.nome.value, documento: f.documento.value, aceite: true, imagem: c.toDataURL('image/png') }) });
+    const d2 = await r.json();
+    if (!r.ok) { err.textContent = d2.error; btn.disabled = false; return; }
+    window.scrollTo(0, 0);
+    load();
+  };
+}
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M2 Seminovos · Carros, motos e bikes elétricas seminovos</title>
+<meta name="description" content="M2 Seminovos: carros, motos e bikes elétricas seminovos com atendimento próximo, claro e confiável.">
+<link rel="icon" href="/assets/m2-favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750&display=swap">
+<link rel="stylesheet" href="/assets/tokens.css">
+<link rel="stylesheet" href="/assets/m2.css">
+<link rel="stylesheet" href="/site/site.css">
+</head>
+<body>
+<header class="header" id="topo">
+  <div class="wrap nav">
+    <a class="brand" href="#/" aria-label="M2 Seminovos — início"><img src="/assets/m2-logo-selo.svg" alt="M2 Seminovos"></a>
+    <button class="menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" id="mt">☰</button>
+    <nav class="links" aria-label="Principal" id="links">
+      <button type="button" data-go="estoque">Estoque</button>
+      <button type="button" data-cat="carro">Carros</button>
+      <button type="button" data-cat="moto">Motos</button>
+      <button type="button" data-cat="bike">Bikes elétricas</button>
+      <button type="button" data-open="vender">Venda seu veículo</button>
+      <button type="button" data-go="sobre">Sobre a M2</button>
+      <a class="area" href="/login">Área restrita</a>
+    </nav>
+    <button class="btn black" type="button" data-open="contato">Fale com a M2</button>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<div class="wrap">
+  <section class="banner" id="sobre">
+    <div><h2>Seu próximo carro começa com uma conversa.</h2><p class="banner-sub" id="sobre-txt"></p></div>
+    <button class="btn" type="button" data-open="contato">Fale com a M2</button>
+  </section>
+  <footer class="footer">
+    <div><div class="wordmark">M2 SEMINOVOS</div><p class="small foot-info" id="foot-info"></p></div>
+    <div class="footer-links"><button type="button" data-go="estoque">Estoque</button><button type="button" data-open="vender">Venda seu veículo</button><a href="/login">Área restrita</a></div>
+  </footer>
+  <p class="notice">Preços, disponibilidade e condições sob consulta e sujeitos a alteração sem aviso. Imagens dos veículos podem ser ilustrativas.</p>
+</div>
+
+<dialog id="dlg-contato" aria-labelledby="dc-t">
+  <div class="dialog-top"><h2 id="dc-t">Fale com a M2</h2><button class="close" type="button" aria-label="Fechar">×</button></div>
+  <p id="dc-sub">Deixe seu contato e a nossa equipe retorna rapidinho.</p>
+  <form data-lead="interesse">
+    <input type="hidden" name="veiculo_id">
+    <label>Nome<input name="nome" required autocomplete="name"></label>
+    <label>Telefone / WhatsApp<input name="telefone" inputmode="tel" autocomplete="tel" required></label>
+    <label>E-mail (opcional)<input name="email" type="email" autocomplete="email"></label>
+    <label>Mensagem<textarea name="mensagem" placeholder="Conte o que você procura"></textarea></label>
+    <button class="btn full" type="submit">Enviar</button>
+    <p class="status" role="status"></p>
+    <p class="small wa-alt" hidden>Prefere agora? <a class="wa-link" target="_blank" rel="noopener">Chamar no WhatsApp</a></p>
+  </form>
+</dialog>
+
+<dialog id="dlg-vender" aria-labelledby="dv-t">
+  <div class="dialog-top"><h2 id="dv-t">Venda seu veículo</h2><button class="close" type="button" aria-label="Fechar">×</button></div>
+  <p>Compramos carros, motos e bikes elétricas. Conte sobre o seu veículo e fazemos uma avaliação sem compromisso.</p>
+  <form data-lead="avaliacao">
+    <label>Nome<input name="nome" required autocomplete="name"></label>
+    <label>Telefone / WhatsApp<input name="telefone" inputmode="tel" autocomplete="tel" required></label>
+    <label>Veículo<input name="veiculo" placeholder="Marca, modelo, ano e quilometragem" required></label>
+    <label>Observações<textarea name="mensagem" placeholder="Estado de conservação, documentação, valor pretendido…"></textarea></label>
+    <button class="btn full" type="submit">Solicitar avaliação</button>
+    <p class="status" role="status"></p>
+  </form>
+</dialog>
+
+<dialog class="lightbox" id="dlg-foto" aria-label="Foto ampliada">
+  <img id="lb-img" alt="">
+  <div class="light-controls"><button class="icon-btn" type="button" id="lb-prev" aria-label="Foto anterior">←</button><span id="lb-count"></span><button class="icon-btn" type="button" id="lb-next" aria-label="Próxima foto">→</button><button class="icon-btn close-lb" type="button" aria-label="Fechar">×</button></div>
+</dialog>
+
+<script type="module" src="/site/site.js"></script>
+</body>
+</html>

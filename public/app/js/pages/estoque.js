@@ -1,0 +1,367 @@
+import { get, post, put, del, api, esc, brl, num, pct, dt, dth, today, can, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, bindRows, statusVeic, vdesc, CATEG, STATUS_V, FORMAS, fotoUrl, icon, pill, pessoaPicker, formData } from '../core.js';
+import { setCrumbs } from '../main.js';
+import { gerarDocumento } from './documentos.js';
+
+const COMBUST = ['Flex', 'Gasolina', 'Etanol', 'Diesel', 'Híbrido', 'Elétrico', 'GNV'];
+const CAMBIO = ['Manual', 'Automático', 'CVT', 'Automatizado', 'Não se aplica'];
+const CUSTO_CATS = ['Mecânica', 'Funilaria e pintura', 'Pneus', 'Elétrica', 'Estética / higienização', 'Documentação / despachante', 'Vistoria / laudo', 'IPVA / licenciamento', 'Multas', 'Transporte / guincho', 'Comissão de compra', 'Anúncios', 'Peças', 'Bateria (bike)', 'Outros'];
+
+const listState = { status: 'estoque', categoria: '', q: '' };
+
+// ------------------------------------------------------------------ lista
+export async function list(view) {
+  setCrumbs('Estoque');
+  view.innerHTML = `<div class="ph"><div><p class="eyebrow">COMERCIAL</p><h1>Estoque</h1><p>Carros, motos e bikes elétricas: compra, custos, FIPE e tempo no pátio.</p></div>
+    <div class="acts">${can('estoque') ? `<button class="btn ghost" id="fipe-all">${icon('refresh')}Atualizar FIPE do estoque</button>` : ''}<a class="btn" href="#/estoque/novo">${icon('plus')}Cadastrar veículo</a></div></div>
+    <div class="filters">
+      <input type="search" id="f-q" placeholder="Buscar por marca, modelo, placa ou chassi" value="${esc(listState.q)}" aria-label="Buscar">
+      <select id="f-cat" aria-label="Categoria"><option value="">Todas as categorias</option>${Object.entries(CATEG).map(([k, v]) => `<option value="${k}" ${listState.categoria === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <div class="seg" role="group" aria-label="Situação">${[['estoque', 'Em estoque'], ['disponivel', 'Disponíveis'], ['preparacao', 'Em preparação'], ['reservado', 'Reservados'], ['vendido', 'Vendidos'], ['', 'Todos']].map(([k, l]) => `<button type="button" data-st="${k}" aria-pressed="${listState.status === k}">${l}</button>`).join('')}</div>
+    </div>
+    <div id="kpis" class="grid g4" style="margin-bottom:16px"></div>
+    <div id="lst"></div>`;
+  const load = async () => {
+    const qs = new URLSearchParams({ status: listState.status, categoria: listState.categoria, q: listState.q });
+    const rows = await get('/veiculos?' + qs);
+    const custo = can('custos');
+    const tot = rows.reduce((a, v) => ({ inv: a.inv + (v.custo_total || 0), an: a.an + (v.preco_venda || 0), fipe: a.fipe + (v.fipe_valor || 0), dias: a.dias + v.dias_patio }), { inv: 0, an: 0, fipe: 0, dias: 0 });
+    view.querySelector('#kpis').innerHTML = `
+      <div class="kpi"><div class="k">Veículos listados</div><div class="v">${rows.length}</div></div>
+      ${custo ? `<div class="kpi"><div class="k">Custo total (compra + custos)</div><div class="v">${brl(tot.inv)}</div></div>` : ''}
+      <div class="kpi"><div class="k">Valor anunciado</div><div class="v">${brl(tot.an)}</div></div>
+      <div class="kpi"><div class="k">Tempo médio no pátio</div><div class="v">${rows.length ? num(tot.dias / rows.length) : 0} dias</div></div>`;
+    const cols = [
+      { label: '', html: (v) => `<span class="thumb-s ${v.foto ? '' : 'noimg'}" style="${v.foto ? `background-image:url('${fotoUrl(v.foto)}')` : ''}"></span>` },
+      { label: 'Veículo', html: (v) => `<div class="t1">${esc(vdesc(v))}</div><div class="t2">${CATEG[v.categoria]} · ${v.ano_fab || '–'}/${v.ano_mod || '–'} · ${esc(v.placa || 'sem placa')}${v.km != null ? ' · ' + num(v.km) + ' km' : ''}</div>` },
+      { label: 'Situação', html: (v) => statusVeic(v.status) + (v.publicado ? ' <span class="pill info" title="Publicado no site">Site</span>' : '') },
+      { label: 'Pátio', num: true, html: (v) => `<span class="pill ${v.status === 'vendido' ? '' : v.dias_patio > 90 ? 'bad' : v.dias_patio > 60 ? 'warn' : ''}">${v.dias_patio} d</span>` },
+      ...(custo ? [{ label: 'Compra', num: true, html: (v) => brl(v.valor_compra) }, { label: 'Custos', num: true, html: (v) => brl(v.custos_total) }] : []),
+      { label: 'FIPE', num: true, html: (v) => (v.fipe_valor ? `${brl(v.fipe_valor)}<div class="t2">${v.fipe_pct ? 'preço ' + pct(v.fipe_pct) : ''}</div>` : '<span class="muted">–</span>') },
+      { label: 'Preço', num: true, html: (v) => `<strong>${brl(v.preco_venda)}</strong>` },
+      ...(custo ? [{ label: 'Margem', num: true, html: (v) => (v.margem == null ? '–' : `<span class="${v.margem < 0 ? 'neg' : ''}">${brl(v.margem)}</span><div class="t2">${pct(v.margem_pct)}</div>`) }] : []),
+    ];
+    view.querySelector('#lst').innerHTML = table(cols, rows, { onRow: true, empty: 'Nenhum veículo encontrado. Cadastre o primeiro em "Cadastrar veículo".' });
+    bindRows(view.querySelector('#lst'), rows, (v) => (location.hash = `#/veiculo/${v.id}`));
+  };
+  let t;
+  view.querySelector('#f-q').oninput = (e) => { clearTimeout(t); t = setTimeout(() => { listState.q = e.target.value; load().catch(fail); }, 250); };
+  view.querySelector('#f-cat').onchange = (e) => { listState.categoria = e.target.value; load().catch(fail); };
+  view.querySelectorAll('[data-st]').forEach((b) => (b.onclick = () => {
+    listState.status = b.dataset.st;
+    view.querySelectorAll('[data-st]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+    load().catch(fail);
+  }));
+  const fa = view.querySelector('#fipe-all');
+  if (fa) fa.onclick = async () => {
+    fa.disabled = true; fa.textContent = 'Atualizando FIPE…';
+    try {
+      const r = await post('/fipe/atualizar-todos');
+      toast(`FIPE atualizada em ${r.atualizados} de ${r.total} veículo(s) com consulta vinculada.${r.erros.length ? ' Falhas: ' + r.erros.length : ''}`, r.erros.length > 0);
+      await load();
+    } catch (e) { fail(e); }
+    fa.disabled = false; fa.innerHTML = `${icon('refresh')}Atualizar FIPE do estoque`;
+  };
+  await load();
+}
+
+// ------------------------------------------------------------------ formulário
+function veiculoForm(v = {}) {
+  const custo = can('custos');
+  const isNew = !v.id;
+  return `<div class="form-grid">
+    <p class="form-sec">Identificação</p>
+    ${selectField('Categoria', 'categoria', CATEG, v.categoria || 'carro', { cls: 'c3', attrs: 'data-cat' })}
+    ${field('Marca', 'marca', v.marca, { cls: 'c3', attrs: 'required' })}
+    ${field('Modelo', 'modelo', v.modelo, { cls: 'c3', attrs: 'required' })}
+    ${field('Versão', 'versao', v.versao, { cls: 'c3' })}
+    ${field('Ano fabricação', 'ano_fab', v.ano_fab, { type: 'number', cls: 'c2', attrs: 'min="1950" max="2100"' })}
+    ${field('Ano modelo', 'ano_mod', v.ano_mod, { type: 'number', cls: 'c2', attrs: 'min="1950" max="2100"' })}
+    ${field('Cor', 'cor', v.cor, { cls: 'c2' })}
+    ${field('Quilometragem', 'km', v.km, { type: 'number', cls: 'c2', attrs: 'min="0"' })}
+    ${field('Placa', 'placa', v.placa, { cls: 'c2', attrs: 'style="text-transform:uppercase" maxlength="8"' })}
+    ${field('RENAVAM', 'renavam', v.renavam, { cls: 'c2' })}
+    ${field('Chassi', 'chassi', v.chassi, { cls: 'c3', attrs: 'style="text-transform:uppercase" maxlength="17"' })}
+    <span class="c3 only-car-moto">${selectField('Combustível', 'combustivel', ['', ...COMBUST], v.combustivel)}</span>
+    <span class="c3 only-car">${selectField('Câmbio', 'cambio', ['', ...CAMBIO], v.cambio)}</span>
+    <span class="c3 only-car">${field('Portas', 'portas', v.portas, { type: 'number', attrs: 'min="0" max="6"' })}</span>
+    <span class="c3 only-car-moto">${field('Motor / cilindrada', 'motor', v.motor, { hint: 'Ex.: 1.0 turbo, 160 cc' })}</span>
+    <span class="c3 only-bike">${field('Autonomia', 'autonomia', v.autonomia, { hint: 'Ex.: 60 km' })}</span>
+    <span class="c3 only-bike">${field('Bateria / motor', 'bateria', v.bateria, { hint: 'Ex.: 48V 15Ah · 350W' })}</span>
+    ${areaField('Opcionais', 'opcionais', v.opcionais, { rows: 2 })}
+    ${areaField('Descrição para o site', 'descricao', v.descricao, { rows: 3 })}
+
+    <p class="form-sec">Entrada e compra</p>
+    ${field('Data de entrada no pátio', 'data_entrada', v.data_entrada || today(), { type: 'date', cls: 'c3' })}
+    ${selectField('Origem', 'origem', { compra: 'Compra', troca: 'Recebido na troca', consignado: 'Consignado' }, v.origem || 'compra', { cls: 'c3' })}
+    <div class="c6" data-forn></div>
+    ${custo ? `${moneyField('Valor de compra', 'valor_compra', v.valor_compra, { cls: 'c3' })}
+    ${selectField('Forma de pagamento da compra', 'forma_pagamento_compra', { '': '—', ...FORMAS }, v.forma_pagamento_compra, { cls: 'c3' })}
+    <label class="check c6" style="margin-top:42px"><input type="checkbox" name="compra_pago" ${v.compra_pago === 0 ? '' : 'checked'}> Compra já paga (lança saída no caixa)</label>` : ''}
+
+    <p class="form-sec">Venda e anúncio</p>
+    ${moneyField('Preço de venda anunciado', 'preco_venda', v.preco_venda, { cls: 'c3' })}
+    ${custo ? moneyField('Preço mínimo (negociação)', 'preco_minimo', v.preco_minimo, { cls: 'c3' }) : ''}
+    ${v.status === 'vendido' ? '' : selectField('Situação', 'status', { preparacao: 'Em preparação', disponivel: 'Disponível', reservado: 'Reservado' }, v.status || 'preparacao', { cls: 'c3' })}
+    <label class="check c3" style="margin-top:42px"><input type="checkbox" name="publicado" ${v.publicado ? 'checked' : ''}> Publicar no site</label>
+    <label class="check c3"><input type="checkbox" name="destaque" ${v.destaque ? 'checked' : ''}> Destaque no site</label>
+    ${isNew ? '<p class="hint c12">Depois de salvar você poderá adicionar fotos, custos e consultar a FIPE.</p>' : ''}
+  </div>`;
+}
+function wireForm(root, v = {}) {
+  const sel = root.querySelector('[data-cat]');
+  const apply = () => {
+    const c = sel.value;
+    root.querySelectorAll('.only-car').forEach((e) => (e.hidden = c !== 'carro'));
+    root.querySelectorAll('.only-car-moto').forEach((e) => (e.hidden = c === 'bike'));
+    root.querySelectorAll('.only-bike').forEach((e) => (e.hidden = c !== 'bike'));
+  };
+  sel.onchange = apply; apply();
+  pessoaPicker(root.querySelector('[data-forn]'), { name: 'fornecedor_id', value: v.fornecedor_id, label: 'Comprado de (fornecedor)' }).then(() => {
+    const s = root.querySelector('[name=fornecedor_id]'); if (s) s.required = false;
+  });
+}
+const clean = (d) => { if (d.placa) d.placa = d.placa.toUpperCase(); if (d.chassi) d.chassi = d.chassi.toUpperCase(); if (d.fornecedor_id === '') d.fornecedor_id = null; return d; };
+
+export async function novo(view) {
+  setCrumbs('Estoque', 'Cadastrar veículo');
+  view.innerHTML = `<div class="ph"><div><p class="eyebrow">ESTOQUE</p><h1>Cadastrar veículo</h1><p>Carro, moto ou bike elétrica.</p></div></div>
+    <form class="card" id="fv" novalidate>${veiculoForm()}<div class="form-actions"><a class="btn ghost" href="#/estoque">Cancelar</a><button class="btn" type="submit">Salvar veículo</button></div></form>`;
+  const f = view.querySelector('#fv');
+  wireForm(f);
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await post('/veiculos', clean(formData(f)));
+      toast('Veículo cadastrado.');
+      location.hash = `#/veiculo/${r.id}`;
+    } catch (err) { fail(err); }
+  };
+}
+
+// ------------------------------------------------------------------ detalhe
+let tabAtual = 'resumo';
+export async function detail(view, { id, params }) {
+  const v = await get('/veiculos/' + id);
+  setCrumbs('Estoque', vdesc(v));
+  if (params.tab) tabAtual = params.tab;
+  const custo = can('custos');
+  const capa = v.fotos[0];
+  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`]] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length})`]];
+  if (!tabs.find((t) => t[0] === tabAtual)) tabAtual = 'resumo';
+
+  view.innerHTML = `<div class="ph"><div class="vhead">
+      <div class="ph-img ${capa ? '' : 'noimg'}" style="${capa ? `background-image:url('${fotoUrl(capa.arquivo)}')` : ''}"></div>
+      <div><p class="eyebrow">${esc(CATEG[v.categoria].toUpperCase())} · ${v.ano_fab || '–'}/${v.ano_mod || '–'}</p><h1>${esc(vdesc(v))}</h1>
+      <p>${statusVeic(v.status)} ${v.publicado ? pill('No site', 'info') : ''} · ${esc(v.placa || 'sem placa')} · ${v.dias_patio} dias no pátio${v.status === 'vendido' ? ' (até a venda)' : ''}</p></div></div>
+    <div class="acts">
+      <button class="btn ghost" id="b-edit">Editar dados</button>
+      ${v.status !== 'vendido' && can('vendas') ? `<a class="btn" href="#/vendas/nova?veiculo=${v.id}">${icon('sale')}Vender</a>` : ''}
+      ${v.venda ? `<a class="btn black" href="#/venda/${v.venda.id}">Ver venda</a>` : ''}
+    </div></div>
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${tabAtual === k}">${esc(l)}</button>`).join('')}</div>
+    <div id="tab"></div>`;
+  view.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => { tabAtual = b.dataset.tab; detail(view, { id, params: {} }); }));
+  view.querySelector('#b-edit').onclick = () => modal({
+    title: 'Editar veículo', size: 'xwide', body: veiculoForm(v), onOpen: (d) => wireForm(d, v),
+    onSubmit: async (d) => { await put('/veiculos/' + v.id, clean(d)); toast('Dados salvos.'); detail(view, { id, params: {} }); },
+  });
+  const reload = () => detail(view, { id, params: {} });
+  const tab = view.querySelector('#tab');
+  ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: tabDocs })[tabAtual](tab, v, reload);
+}
+
+function tabResumo(el, v, reload) {
+  const custo = can('custos');
+  el.innerHTML = `<div class="grid g-main">
+    <section class="card"><h2>Dados do veículo</h2><dl class="dl">
+      ${[['Categoria', CATEG[v.categoria]], ['Marca', v.marca], ['Modelo', v.modelo], ['Versão', v.versao], ['Ano', `${v.ano_fab || '–'}/${v.ano_mod || '–'}`], ['Cor', v.cor], ['Quilometragem', v.km != null ? num(v.km) + ' km' : null], ['Placa', v.placa], ['RENAVAM', v.renavam], ['Chassi', v.chassi],
+        ...(v.categoria === 'bike' ? [['Autonomia', v.autonomia], ['Bateria / motor', v.bateria]] : [['Combustível', v.combustivel], ['Motor', v.motor]]), ...(v.categoria === 'carro' ? [['Câmbio', v.cambio], ['Portas', v.portas]] : []),
+        ['Entrada no pátio', dt(v.data_entrada)], ['Origem', { compra: 'Compra', troca: 'Troca', consignado: 'Consignado' }[v.origem] || v.origem], ...(custo ? [['Fornecedor', v.fornecedor_nome]] : [])]
+        .map(([k, x]) => `<div><dt>${esc(k)}</dt><dd>${esc(x ?? '–') || '–'}</dd></div>`).join('')}
+    </dl>${v.opcionais ? `<p style="margin:16px 0 0"><strong>Opcionais:</strong> <span class="muted">${esc(v.opcionais)}</span></p>` : ''}
+    ${v.descricao ? `<p style="margin:10px 0 0" class="muted">${esc(v.descricao)}</p>` : ''}</section>
+    <section class="stack">
+      <div class="card"><h2>Valores</h2>
+        ${custo ? `<div class="kv"><span>Valor de compra</span><strong>${brl(v.valor_compra)}</strong></div>
+        <div class="kv"><span>Custos de preparação</span><strong>${brl(v.custos_total)}</strong></div>
+        <div class="kv total"><span>Custo total</span><strong>${brl(v.custo_total)}</strong></div>` : ''}
+        <div class="kv"><span>Preço anunciado</span><strong class="gold">${brl(v.preco_venda)}</strong></div>
+        ${custo && v.preco_minimo ? `<div class="kv"><span>Preço mínimo</span><strong>${brl(v.preco_minimo)}</strong></div>` : ''}
+        ${custo ? `<div class="kv"><span>Margem prevista</span><strong class="${v.margem < 0 ? 'neg' : ''}">${brl(v.margem)} · ${pct(v.margem_pct)}</strong></div>` : ''}
+        <div class="kv"><span>Tabela FIPE</span><strong>${v.fipe_valor ? brl(v.fipe_valor) : '–'}</strong></div>
+        ${v.fipe_valor ? `<div class="kv"><span>Preço / FIPE</span><strong>${pct(v.fipe_pct)}</strong></div>${custo ? `<div class="kv"><span>Compra / FIPE</span><strong>${pct(v.compra_fipe_pct)}</strong></div>` : ''}` : ''}
+        ${v.venda ? `<div class="kv total"><span>Vendido por</span><strong>${brl(v.venda.valor_venda)}</strong></div>${v.lucro != null ? `<div class="kv"><span>Lucro na venda</span><strong class="${v.lucro < 0 ? 'neg' : 'pos'}">${brl(v.lucro)}</strong></div>` : ''}<div class="kv"><span>Cliente</span><strong>${esc(v.venda.cliente_nome)}</strong></div>` : ''}
+      </div>
+      <div class="card"><h2>Ações rápidas</h2><div class="stack" style="gap:10px">
+        ${custo ? `<button class="btn ghost full" data-act="custo">${icon('plus')}Lançar custo</button>` : ''}
+        <button class="btn ghost full" data-act="fipe">${icon('refresh')}Consultar FIPE</button>
+        ${custo && v.origem === 'compra' ? `<button class="btn ghost full" data-act="recibo">${icon('doc')}Gerar recibo de compra</button>` : ''}
+        ${v.status !== 'vendido' && can('custos') ? `<button class="btn danger full" data-act="del">Excluir veículo</button>` : ''}
+      </div></div>
+    </section></div>`;
+  const act = (k, fn) => { const b = el.querySelector(`[data-act=${k}]`); if (b) b.onclick = fn; };
+  act('custo', () => custoForm(v, null, reload));
+  act('fipe', () => fipeDialog(v, reload));
+  act('recibo', () => gerarDocumento({ veiculo_id: v.id, tipo: 'recibo_compra' }));
+  act('del', async () => {
+    if (!(await confirmDlg('Excluir este veículo, suas fotos, custos e o lançamento de compra? Esta ação não pode ser desfeita.', 'Excluir'))) return;
+    try { await del('/veiculos/' + v.id); toast('Veículo excluído.'); location.hash = '#/estoque'; } catch (e) { fail(e); }
+  });
+}
+
+function custoForm(v, c, reload) {
+  modal({
+    title: c ? 'Editar custo' : 'Lançar custo', size: 'wide',
+    body: `<div class="form-grid">${field('Data', 'data', c ? c.data : today(), { type: 'date', cls: 'c3' })}
+      ${selectField('Categoria', 'categoria', CUSTO_CATS, c ? c.categoria : 'Mecânica', { cls: 'c3' })}
+      ${moneyField('Valor', 'valor', c && c.valor, { cls: 'c3', attrs: 'required' })}
+      <label class="check c3" style="margin-top:42px"><input type="checkbox" name="pago" ${!c || c.lanc_status === 'pago' ? 'checked' : ''}> Já pago</label>
+      ${field('Descrição', 'descricao', c && c.descricao, { cls: 'c8', attrs: 'placeholder="Ex.: troca de pastilhas e discos"' })}
+      ${field('Fornecedor / oficina', 'fornecedor', c && c.fornecedor, { cls: 'c4' })}
+      <p class="hint c12">O custo entra no cálculo de margem do veículo e gera uma saída no fluxo de caixa (paga ou a pagar).</p></div>`,
+    onSubmit: async (d) => {
+      if (c) await put('/custos/' + c.id, d); else await post(`/veiculos/${v.id}/custos`, d);
+      toast('Custo salvo.'); tabAtual = 'custos'; reload();
+    },
+  });
+}
+
+function tabCustos(el, v, reload) {
+  const rows = v.custos;
+  el.innerHTML = `<div class="card"><div class="card-h"><h2>Custos do veículo</h2><button class="btn sm" id="add">${icon('plus')}Lançar custo</button></div>
+    ${table([
+      { label: 'Data', html: (c) => dt(c.data) }, { label: 'Categoria', key: 'categoria' }, { label: 'Descrição', key: 'descricao' }, { label: 'Fornecedor', key: 'fornecedor' },
+      { label: 'Pagamento', html: (c) => (c.lanc_status === 'pago' ? pill('Pago', 'ok') : pill('A pagar', 'warn')) },
+      { label: 'Valor', num: true, html: (c) => brl(c.valor) },
+      { label: '', html: () => '<button class="btn sm ghost" data-ed>Editar</button> <button class="btn sm danger" data-rm>Excluir</button>', cls: 'nowrap right' },
+    ], rows, { empty: 'Nenhum custo lançado para este veículo.', foot: rows.length ? ['Total', '', '', '', '', brl(v.custos_total), ''] : null })}</div>
+    <div class="grid g3" style="margin-top:18px">
+      <div class="kpi"><div class="k">Compra</div><div class="v">${brl(v.valor_compra)}</div></div>
+      <div class="kpi"><div class="k">Custos</div><div class="v">${brl(v.custos_total)}</div></div>
+      <div class="kpi dark"><div class="k">Custo total</div><div class="v">${brl(v.custo_total)}</div><div class="s">Margem prevista: ${brl(v.margem)} (${pct(v.margem_pct)})</div></div></div>`;
+  el.querySelector('#add').onclick = () => custoForm(v, null, reload);
+  el.querySelectorAll('tbody tr').forEach((tr, i) => {
+    const c = rows[i];
+    tr.querySelector('[data-ed]').onclick = () => custoForm(v, c, reload);
+    tr.querySelector('[data-rm]').onclick = async () => {
+      if (!(await confirmDlg('Excluir este custo? O lançamento no caixa também será removido.', 'Excluir'))) return;
+      try { await del('/custos/' + c.id); toast('Custo excluído.'); reload(); } catch (e) { fail(e); }
+    };
+  });
+}
+
+// ------------------------------------------------------------------ FIPE
+export function fipeDialog(v, reload) {
+  const tipoPadrao = v.categoria === 'moto' ? 'motos' : 'carros';
+  const m = modal({
+    title: 'Consulta FIPE', size: 'wide',
+    body: `${v.categoria === 'bike' ? '<div class="alert">Bikes elétricas não constam na tabela FIPE. Informe um valor de referência manualmente (ex.: preço de mercado).</div>' : ''}
+      <div class="form-grid" ${v.categoria === 'bike' ? 'hidden' : ''}>
+        ${selectField('Tipo', 'tipo', { carros: 'Carros', motos: 'Motos', caminhoes: 'Caminhões' }, v.fipe_tipo || tipoPadrao, { cls: 'c3' })}
+        <label class="c3">Marca<select name="marca"><option>Carregando…</option></select></label>
+        <label class="c6">Modelo<select name="modelo" disabled><option value="">Escolha a marca</option></select></label>
+        <label class="c6">Ano / combustível<select name="ano" disabled><option value="">Escolha o modelo</option></select></label>
+        <div class="c6" style="display:flex;align-items:end"><button type="button" class="btn black full" data-consultar disabled>Consultar valor</button></div>
+      </div>
+      <div id="fipe-res" style="margin-top:18px"></div>
+      <details ${v.categoria === 'bike' ? 'open' : ''} style="margin-top:16px"><summary style="cursor:pointer;font-weight:600">Informar valor manualmente</summary>
+        <form class="form-grid" id="fipe-man">${moneyField('Valor de referência', 'valor', '', { cls: 'c6' })}${field('Referência', 'referencia', '', { cls: 'c6', attrs: 'placeholder="Ex.: novembro de 2026"' })}
+        <div class="c12 form-actions"><button class="btn" type="submit">Salvar valor manual</button></div></form></details>`,
+  });
+  const d = m.el;
+  const sel = (n) => d.querySelector(`[name=${n}]`);
+  const res = d.querySelector('#fipe-res');
+  const opt = (arr, k, l, first) => `<option value="">${first}</option>` + arr.map((x) => `<option value="${esc(x[k])}">${esc(x[l])}</option>`).join('');
+  const loadMarcas = async () => {
+    sel('marca').innerHTML = '<option>Carregando…</option>';
+    try {
+      const ms = await get(`/fipe/${sel('tipo').value}/marcas`);
+      sel('marca').innerHTML = opt(ms, 'codigo', 'nome', 'Selecione a marca');
+      const match = ms.find((x) => v.fipe_marca ? String(x.codigo) === String(v.fipe_marca) : x.nome.toLowerCase().includes(String(v.marca || '').toLowerCase()));
+      if (match) { sel('marca').value = match.codigo; loadModelos(); }
+    } catch (e) { sel('marca').innerHTML = '<option value="">Indisponível</option>'; res.innerHTML = `<div class="alert">${esc(e.message)}</div>`; }
+  };
+  const loadModelos = async () => {
+    sel('modelo').disabled = true; sel('ano').disabled = true; d.querySelector('[data-consultar]').disabled = true;
+    if (!sel('marca').value) return;
+    sel('modelo').innerHTML = '<option>Carregando…</option>';
+    try {
+      const ms = await get(`/fipe/${sel('tipo').value}/marcas/${sel('marca').value}/modelos`);
+      sel('modelo').innerHTML = opt(ms, 'codigo', 'nome', 'Selecione o modelo'); sel('modelo').disabled = false;
+      if (v.fipe_modelo && ms.find((x) => String(x.codigo) === String(v.fipe_modelo))) { sel('modelo').value = v.fipe_modelo; loadAnos(); }
+    } catch (e) { fail(e); }
+  };
+  const loadAnos = async () => {
+    sel('ano').disabled = true; d.querySelector('[data-consultar]').disabled = true;
+    if (!sel('modelo').value) return;
+    try {
+      const as = await get(`/fipe/${sel('tipo').value}/marcas/${sel('marca').value}/modelos/${sel('modelo').value}/anos`);
+      sel('ano').innerHTML = opt(as, 'codigo', 'nome', 'Selecione o ano'); sel('ano').disabled = false;
+      const pre = v.fipe_ano || (as.find((a) => String(a.codigo).startsWith(String(v.ano_mod))) || {}).codigo;
+      if (pre) { sel('ano').value = pre; d.querySelector('[data-consultar]').disabled = !sel('ano').value; }
+    } catch (e) { fail(e); }
+  };
+  sel('tipo').onchange = loadMarcas; sel('marca').onchange = loadModelos; sel('modelo').onchange = loadAnos;
+  sel('ano').onchange = () => (d.querySelector('[data-consultar]').disabled = !sel('ano').value);
+  d.querySelector('[data-consultar]').onclick = async () => {
+    try {
+      const r = await get(`/fipe/${sel('tipo').value}/marcas/${sel('marca').value}/modelos/${sel('modelo').value}/anos/${sel('ano').value}`);
+      res.innerHTML = `<div class="card" style="background:var(--bg)"><p class="eyebrow">TABELA FIPE · ${esc(r.MesReferencia || '')}</p>
+        <div class="price" style="font-size:30px">${esc(r.Valor)}</div>
+        <p class="muted" style="margin:0">${esc(r.Marca)} ${esc(r.Modelo)} · ${esc(r.AnoModelo)} · ${esc(r.Combustivel)} · código ${esc(r.CodigoFipe)}</p>
+        ${v.preco_venda ? `<p class="muted" style="margin:6px 0 0">Preço anunciado = ${pct((v.preco_venda / r.valor_num) * 100)} da FIPE</p>` : ''}
+        <div class="form-actions"><button class="btn" type="button" data-salvar>Salvar no veículo</button></div></div>`;
+      res.querySelector('[data-salvar]').onclick = async () => {
+        try {
+          await post(`/veiculos/${v.id}/fipe`, { valor: r.valor_num, referencia: r.MesReferencia, codigo: r.CodigoFipe, tipo: sel('tipo').value, marca: sel('marca').value, modelo: sel('modelo').value, ano: sel('ano').value, origem: 'api' });
+          toast('Valor FIPE salvo.'); m.close(); reload();
+        } catch (e) { fail(e); }
+      };
+    } catch (e) { res.innerHTML = `<div class="alert">${esc(e.message)}</div>`; }
+  };
+  d.querySelector('#fipe-man').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await post(`/veiculos/${v.id}/fipe`, { ...formData(e.target), origem: 'manual' }); toast('Valor salvo.'); m.close(); reload(); } catch (err) { fail(err); }
+  };
+  if (v.categoria !== 'bike') loadMarcas();
+}
+
+function tabFipe(el, v, reload) {
+  el.innerHTML = `<div class="grid g-main"><section class="card"><div class="card-h"><h2>Histórico de valores FIPE</h2></div>
+    ${table([{ label: 'Consulta', html: (h) => dth(h.data) }, { label: 'Referência', key: 'referencia' }, { label: 'Origem', html: (h) => (h.origem === 'api' ? 'Tabela FIPE' : 'Manual') }, { label: 'Valor', num: true, html: (h) => brl(h.valor) }], v.fipe_historico, { empty: 'Nenhuma consulta registrada.' })}</section>
+    <section class="card"><h2>Situação atual</h2>
+      <div class="kv"><span>Valor FIPE</span><strong>${brl(v.fipe_valor)}</strong></div>
+      <div class="kv"><span>Referência</span><strong>${esc(v.fipe_referencia || '–')}</strong></div>
+      <div class="kv"><span>Código FIPE</span><strong>${esc(v.fipe_codigo || '–')}</strong></div>
+      <div class="kv"><span>Atualizado em</span><strong>${dth(v.fipe_atualizado_em)}</strong></div>
+      <div class="kv"><span>Preço anunciado / FIPE</span><strong>${pct(v.fipe_pct)}</strong></div>
+      ${can('custos') ? `<div class="kv"><span>Compra / FIPE</span><strong>${pct(v.compra_fipe_pct)}</strong></div>` : ''}
+      <div class="stack" style="gap:10px;margin-top:16px">
+        <button class="btn full" id="cons">Nova consulta FIPE</button>
+        ${v.fipe_marca && v.fipe_ano ? `<button class="btn ghost full" id="upd">${icon('refresh')}Atualizar com a tabela do mês</button>` : ''}
+      </div></section></div>`;
+  el.querySelector('#cons').onclick = () => fipeDialog(v, reload);
+  const u = el.querySelector('#upd');
+  if (u) u.onclick = async () => { u.disabled = true; try { const r = await post(`/veiculos/${v.id}/fipe/atualizar`); toast('FIPE atualizada: ' + brl(r.valor)); reload(); } catch (e) { fail(e); u.disabled = false; } };
+}
+
+function tabFotos(el, v, reload) {
+  el.innerHTML = `<div class="card"><div class="card-h"><h2>Fotos</h2><label class="btn sm" style="margin:0;cursor:pointer">${icon('plus')}Enviar fotos<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden id="up"></label></div>
+    <p class="muted" style="margin:-6px 0 16px">A primeira foto é a capa no site. Use fotos em fundo neutro, proporção 3:2: dianteira, lateral, traseira e interior.</p>
+    ${v.fotos.length ? `<div class="photos">${v.fotos.map((f, i) => `<figure class="${i === 0 ? 'capa' : ''}" style="background-image:url('${fotoUrl(f.arquivo)}')">${i === 0 ? '<span class="badge tag">Capa</span>' : ''}
+      <div class="ops">${i ? `<button type="button" data-capa="${f.id}">Usar como capa</button>` : ''}<button type="button" data-rm="${f.id}">Excluir</button></div></figure>`).join('')}</div>` : '<div class="empty">Nenhuma foto enviada.</div>'}</div>`;
+  el.querySelector('#up').onchange = async (e) => {
+    const fd = new FormData();
+    [...e.target.files].forEach((f) => fd.append('fotos', f));
+    try { const r = await api(`/veiculos/${v.id}/fotos`, { method: 'POST', body: fd }); toast(`${r.enviadas} foto(s) enviada(s).`); reload(); } catch (err) { fail(err); }
+  };
+  el.querySelectorAll('[data-capa]').forEach((b) => (b.onclick = async () => { await put(`/fotos/${b.dataset.capa}/capa`, {}); reload(); }));
+  el.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { if (await confirmDlg('Excluir esta foto?', 'Excluir')) { await del('/fotos/' + b.dataset.rm); reload(); } }));
+}
+
+function tabDocs(el, v) {
+  el.innerHTML = `<div class="card"><div class="card-h"><h2>Documentos do veículo</h2><button class="btn sm" id="nd">${icon('plus')}Gerar documento</button></div>
+    ${table([{ label: 'Documento', key: 'titulo' }, { label: 'Criado', html: (d) => dth(d.criado_em) }, { label: 'Situação', html: (d) => (d.assinado_em ? pill('Assinado', 'ok') : d.status === 'enviado' ? pill('Aguardando assinatura', 'warn') : pill('Gerado')) }], v.documentos, { onRow: true, empty: 'Nenhum documento gerado.' })}</div>`;
+  bindRows(el, v.documentos, (d) => (location.hash = `#/documento/${d.id}`));
+  el.querySelector('#nd').onclick = () => gerarDocumento({ veiculo_id: v.id, venda_id: v.venda && v.venda.id });
+}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Área restrita · M2 Seminovos</title>
+<link rel="icon" href="/assets/m2-favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;650;700;750&display=swap">
+<link rel="stylesheet" href="/assets/tokens.css">
+<link rel="stylesheet" href="/assets/m2.css">
+<style>
+body{min-height:100vh;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,1fr);background:var(--bg)}
+.brandside{background:var(--ink);color:#fff;display:flex;flex-direction:column;justify-content:space-between;padding:48px 56px}
+.brandside img{width:min(420px,80%);display:block;margin:auto 0}
+.brandside h1{font-size:30px;letter-spacing:-.035em;line-height:1.2;margin:0 0 10px;max-width:460px}
+.brandside p{color:#b8b8bf;margin:0;font-size:15px;line-height:1.6;max-width:460px}
+.brandside .wordmark{color:#d4d4d8;margin-top:28px}
+.formside{display:flex;align-items:center;justify-content:center;padding:40px 24px}
+.box{width:min(400px,100%)}
+.box h2{font-size:26px;letter-spacing:-.035em;margin:0 0 6px}
+.box .lead{margin-bottom:8px}
+form .btn{width:100%;margin-top:24px}
+.err{color:#b42318;font-size:13px;margin-top:14px;min-height:20px}
+.back{display:inline-block;margin-top:24px;font-size:13px;color:var(--muted)}.back:hover{color:var(--gold-link-hover)}
+@media(max-width:860px){body{grid-template-columns:1fr}.brandside{padding:28px 24px}.brandside img{width:180px;margin:0 0 20px}.brandside h1{font-size:22px}.brandside .wordmark{display:none}}
+</style>
+</head>
+<body>
+<section class="brandside">
+  <img src="/assets/m2-logo.svg" alt="M2 Seminovos">
+  <div><h1>Gestão da loja em um só lugar.</h1><p>Estoque, custos, FIPE, vendas, contratos e fluxo de caixa da M2 Seminovos.</p><div class="wordmark">M2 SEMINOVOS</div></div>
+</section>
+<main class="formside">
+  <div class="box">
+    <p class="eyebrow">ÁREA RESTRITA</p>
+    <h2>Entrar no sistema</h2>
+    <p class="lead">Acesso para a equipe da loja.</p>
+    <form id="f">
+      <label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" required autofocus>
+      <label for="senha">Senha</label><input id="senha" name="senha" type="password" autocomplete="current-password" required>
+      <button class="btn black" type="submit">Entrar</button>
+      <p class="err" id="err" role="alert"></p>
+    </form>
+    <a class="back" href="/">← Voltar para o site</a>
+  </div>
+</main>
+<script>
+document.getElementById('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('err'); err.textContent = '';
+  const btn = e.target.querySelector('button'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: e.target.email.value, senha: e.target.senha.value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Não foi possível entrar.');
+    const volta = new URLSearchParams(location.search).get('volta') || '';
+    location.href = '/app/' + (volta.startsWith('#') ? volta : '');
+  } catch (x) { err.textContent = x.message; btn.disabled = false; }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+/* M2 Seminovos — generated from tokens.json */
+:root, [data-theme="light"] {
+  --gold: #d6a63d;
+  --gold-hover: #e1b651;
+  --gold-text: #936918;
+  --gold-eyebrow: #906616;
+  --gold-link-hover: #8e6516;
+  --gold-soft: #fff6de;
+  --gold-on-soft: #7e5812;
+  --gold-dark-hover: #29241b;
+  --focus: #9a711d;
+  --ink: #111111;
+  --ink-hover: #303030;
+  --ink-soft: #222222;
+  --muted: #626268;
+  --status: #4a4a50;
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --header-bg: #ffffffd9;
+  --line: #dedee3;
+  --line-header: #e9e9ec;
+  --line-card: #e7e7eb;
+  --line-specs: #e5e5ea;
+  --dialog-line: #dddde3;
+  --input-border: #9999a3;
+  --thumb-hover: #b8b8bf;
+  --outline-hover: #ececf0;
+  --chip: #f1f1f3;
+  --photo-bg: #e9e9eb;
+  --logo-silver: #d4d4d8;
+  --logo-gold-light: #b08224;
+  --shadow-card: 0 4px 18px #00000003;
+  --shadow-dialog: 0 25px 90px #00000033;
+}
+:root {
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-28: 28px;
+  --space-30: 30px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --wrap: 1280px;
+  --radius-8: 8px;
+  --radius-9: 9px;
+  --radius-10: 10px;
+  --radius-11: 11px;
+  --radius-15: 15px;
+  --radius-16: 16px;
+  --radius-18: 18px;
+  --radius-20: 20px;
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
+.title-xl { font-family: var(--font-sans); font-size: 36px; line-height: 1.12; font-weight: 700; letter-spacing: -0.04em; }
+.price { font-family: var(--font-sans); font-size: 35px; line-height: 1.2; font-weight: 750; letter-spacing: -0.035em; }
+.title-lg { font-family: var(--font-sans); font-size: 26px; line-height: 1.2; font-weight: 700; letter-spacing: -0.035em; }
+.title-md { font-family: var(--font-sans); font-size: 25px; line-height: 1.2; font-weight: 700; letter-spacing: -0.035em; }
+.title-banner { font-family: var(--font-sans); font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.035em; }
+.eyebrow { font-family: var(--font-sans); font-size: 12px; line-height: 1.3; font-weight: 750; letter-spacing: 0.15em; }
+.wordmark { font-family: var(--font-sans); font-size: 13px; line-height: 1.3; font-weight: 650; letter-spacing: 0.28em; }
+.nav { font-family: var(--font-sans); font-size: 14px; line-height: 1.3; font-weight: 600; }
+.button { font-family: var(--font-sans); font-size: 15px; line-height: 1.2; font-weight: 650; }
+.spec-label { font-family: var(--font-sans); font-size: 13px; line-height: 1.4; font-weight: 650; }
+.body { font-family: var(--font-sans); font-size: 15px; line-height: 1.6; font-weight: 400; }
+.spec-value { font-family: var(--font-sans); font-size: 14px; line-height: 1.4; font-weight: 400; }
+.crumb { font-family: var(--font-sans); font-size: 13px; line-height: 1.4; font-weight: 400; }
+.small { font-family: var(--font-sans); font-size: 11px; line-height: 1.6; font-weight: 400; }
