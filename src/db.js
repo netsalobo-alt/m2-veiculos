@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS fipe_historico (
   veiculo_id INTEGER NOT NULL REFERENCES veiculos(id) ON DELETE CASCADE,
   data TEXT DEFAULT (datetime('now','localtime')), valor REAL, referencia TEXT, origem TEXT
 );
+CREATE TABLE IF NOT EXISTS placa_consultas (
+  placa TEXT PRIMARY KEY, resposta TEXT NOT NULL,
+  consultado_em TEXT DEFAULT (datetime('now','localtime'))
+);
 
 CREATE TABLE IF NOT EXISTS vendas (
   id INTEGER PRIMARY KEY,
@@ -174,6 +178,7 @@ const DEFAULT_SETTINGS = {
   smtp_host: '', smtp_port: '587', smtp_secure: '0', smtp_user: '', smtp_pass: '', smtp_from: '',
   garantia_padrao_dias: '90',
   foro: '',
+  fipe_token: '',
 };
 const insSetting = db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)');
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insSetting.run(k, v);

@@ -18,6 +18,8 @@ export async function render(view) {
       ${field('Servidor SMTP', 'smtp_host', s.smtp_host, { cls: 'c4' })}${field('Porta', 'smtp_port', s.smtp_port, { cls: 'c2' })}${selectField('Conexão segura (SSL)', 'smtp_secure', { 0: 'Não (STARTTLS / 587)', 1: 'Sim (SSL / 465)' }, s.smtp_secure, { cls: 'c3' })}
       ${field('Usuário', 'smtp_user', s.smtp_user, { cls: 'c3', attrs: 'autocomplete="off"' })}${field('Senha', 'smtp_pass', s.smtp_pass, { type: 'password', cls: 'c4', attrs: 'autocomplete="new-password"' })}${field('Remetente', 'smtp_from', s.smtp_from, { cls: 'c5', attrs: 'placeholder="M2 Seminovos <contato@m2seminovos.com.br>"' })}
       <div class="c3" style="display:flex;align-items:end"><button type="button" class="btn ghost full" id="teste">Enviar e-mail de teste</button></div></div></section>
+    <section class="card"><h2>FIPE API (consulta por placa)</h2><p class="muted" style="margin:-6px 0 4px">Token da FIPE API (fipe.parallelum.com.br), usado no botão "Buscar placa" do cadastro de veículos. Placas já consultadas ficam guardadas e não gastam cota de novo.</p><div class="form-grid">
+      ${field('Token de acesso', 'fipe_token', s.fipe_token, { type: 'password', cls: 'c8', attrs: 'autocomplete="off"', hint: s.fipe_token ? 'Token configurado. Para trocar, apague e cole o novo.' : 'Nenhum token configurado.' })}</div></section>
     <div class="form-actions"><button class="btn" type="submit">Salvar configurações</button></div>
   </form>`;
   const f = view.querySelector('#f');
