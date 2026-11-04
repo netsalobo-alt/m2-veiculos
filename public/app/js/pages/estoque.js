@@ -70,6 +70,11 @@ function veiculoForm(v = {}) {
   const isNew = !v.id;
   return `<div class="form-grid">
     <p class="form-sec">Identificação</p>
+    ${field('Placa', 'placa', v.placa, { cls: 'c3', attrs: 'style="text-transform:uppercase" maxlength="8" placeholder="ABC1D23" autocomplete="off"' })}
+    <div class="c3" style="display:flex;align-items:end"><button type="button" class="btn ghost full" data-placa-busca>${icon('refresh')}Buscar placa (FIPE)</button></div>
+    <p class="hint c6" data-placa-info style="align-self:end;margin-bottom:12px">Digite a placa e clique em <strong>Buscar placa</strong> para preencher marca, modelo, ano, cor e combustível.</p>
+    <div class="c12" data-placa-res></div>
+    <input type="hidden" name="_fipe_valor"><input type="hidden" name="_fipe_codigo">
     ${selectField('Categoria', 'categoria', CATEG, v.categoria || 'carro', { cls: 'c3', attrs: 'data-cat' })}
     ${field('Marca', 'marca', v.marca, { cls: 'c3', attrs: 'required' })}
     ${field('Modelo', 'modelo', v.modelo, { cls: 'c3', attrs: 'required' })}
@@ -78,8 +83,7 @@ function veiculoForm(v = {}) {
     ${field('Ano modelo', 'ano_mod', v.ano_mod, { type: 'number', cls: 'c2', attrs: 'min="1950" max="2100"' })}
     ${field('Cor', 'cor', v.cor, { cls: 'c2' })}
     ${field('Quilometragem', 'km', v.km, { type: 'number', cls: 'c2', attrs: 'min="0"' })}
-    ${field('Placa', 'placa', v.placa, { cls: 'c2', attrs: 'style="text-transform:uppercase" maxlength="8"' })}
-    ${field('RENAVAM', 'renavam', v.renavam, { cls: 'c2' })}
+    ${field('RENAVAM', 'renavam', v.renavam, { cls: 'c3' })}
     ${field('Chassi', 'chassi', v.chassi, { cls: 'c3', attrs: 'style="text-transform:uppercase" maxlength="17"' })}
     <span class="c3 only-car-moto">${selectField('Combustível', 'combustivel', ['', ...COMBUST], v.combustivel)}</span>
     <span class="c3 only-car">${selectField('Câmbio', 'cambio', ['', ...CAMBIO], v.cambio)}</span>
@@ -119,6 +123,62 @@ function wireForm(root, v = {}) {
   pessoaPicker(root.querySelector('[data-forn]'), { name: 'fornecedor_id', value: v.fornecedor_id, label: 'Comprado de (fornecedor)' }).then(() => {
     const s = root.querySelector('[name=fornecedor_id]'); if (s) s.required = false;
   });
+  wirePlaca(root, !v.id, apply);
+}
+
+// Consulta por placa (FIPE API v2): preenche os campos e oferece os preços FIPE das versões compatíveis.
+function wirePlaca(root, isNew, applyCat) {
+  const btn = root.querySelector('[data-placa-busca]');
+  const inp = root.querySelector('[name=placa]');
+  const info = root.querySelector('[data-placa-info]');
+  const res = root.querySelector('[data-placa-res]');
+  const hv = root.querySelector('[name=_fipe_valor]');
+  const hc = root.querySelector('[name=_fipe_codigo]');
+  if (!btn || !inp) return;
+  const set = (name, val) => {
+    const el = root.querySelector(`[name=${name}]`);
+    if (!el || val == null || val === '') return;
+    if (!isNew && el.value && name !== 'categoria') return; // na edição, não sobrescreve o que já foi preenchido
+    if (!isNew && name === 'categoria') return;
+    if (el.tagName === 'SELECT' && ![...el.options].some((o) => o.value === String(val))) return;
+    el.value = val;
+  };
+  const buscar = async () => {
+    const placa = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!placa) { toast('Digite a placa.'); inp.focus(); return; }
+    btn.disabled = true; const label = btn.innerHTML; btn.textContent = 'Consultando…';
+    try {
+      const r = await get('/fipe/placa/' + placa);
+      inp.value = r.placa || placa;
+      ['categoria', 'marca', 'modelo', 'versao', 'ano_fab', 'ano_mod', 'cor', 'combustivel'].forEach((k) => set(k, r[k]));
+      applyCat();
+      info.innerHTML = `<strong>${esc(`${r.marca} ${r.modelo} ${r.versao}`.trim())}</strong> · ${esc(String(r.ano_mod || ''))}${r.cor ? ' · ' + esc(r.cor) : ''}${r.municipio ? ' · ' + esc(r.municipio) : ''}${r.chassi_final ? ' · chassi ' + esc(r.chassi_final) : ''}<br>${r.cache ? 'Dados já consultados antes (sem gastar cota).' : `Consulta feita${r.cota_restante != null ? ` · restam ${r.cota_restante} consulta(s) de placa hoje` : ''}.`} Confira os campos abaixo.`;
+      hv.value = ''; hc.value = '';
+      if (r.fipe && r.fipe.length) {
+        res.innerHTML = `<div class="card" style="margin:4px 0 16px;padding:14px 16px"><p style="margin:0 0 8px;font-weight:700">Valor FIPE: escolha a versão do veículo</p>
+          ${r.fipe.map((p, i) => `<label class="check" style="margin-top:6px;font-weight:500"><input type="radio" name="_fipe_opt" value="${i}" ${r.fipe.length === 1 ? 'checked' : ''}> <span style="flex:1">${esc(p.modelo)} <span class="muted">· ${esc(p.codigo)}</span></span><strong>${brl(p.valor)}</strong></label>`).join('')}
+          <label class="check" style="margin-top:6px;font-weight:500"><input type="radio" name="_fipe_opt" value=""> <span class="muted">Não usar valor FIPE agora</span></label></div>`;
+        const pick = () => {
+          const sel = res.querySelector('[name=_fipe_opt]:checked');
+          const p = sel && sel.value !== '' ? r.fipe[Number(sel.value)] : null;
+          hv.value = p ? p.valor : ''; hc.value = p ? p.codigo : '';
+        };
+        res.querySelectorAll('[name=_fipe_opt]').forEach((x) => (x.onchange = pick)); pick();
+      } else {
+        res.innerHTML = '<p class="hint" style="margin:0 0 12px">A consulta não trouxe preço FIPE para esta placa. Você pode consultar depois na aba FIPE do veículo.</p>';
+      }
+    } catch (e) { fail(e); }
+    btn.disabled = false; btn.innerHTML = label;
+  };
+  btn.onclick = buscar;
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); buscar(); } });
+}
+// Grava o valor FIPE escolhido na consulta por placa (se houver) no histórico do veículo.
+async function salvarFipePlaca(id, d) {
+  const valor = Number(d._fipe_valor);
+  if (!(valor > 0)) return;
+  const referencia = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  try { await post(`/veiculos/${id}/fipe`, { valor, codigo: d._fipe_codigo || null, referencia, origem: 'placa' }); } catch (e) { fail(e); }
 }
 const clean = (d) => { if (d.placa) d.placa = d.placa.toUpperCase(); if (d.chassi) d.chassi = d.chassi.toUpperCase(); if (d.fornecedor_id === '') d.fornecedor_id = null; return d; };
 
@@ -131,7 +191,9 @@ export async function novo(view) {
   f.onsubmit = async (e) => {
     e.preventDefault();
     try {
-      const r = await post('/veiculos', clean(formData(f)));
+      const d = clean(formData(f));
+      const r = await post('/veiculos', d);
+      await salvarFipePlaca(r.id, d);
       toast('Veículo cadastrado.');
       location.hash = `#/veiculo/${r.id}`;
     } catch (err) { fail(err); }
@@ -163,7 +225,7 @@ export async function detail(view, { id, params }) {
   view.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => { tabAtual = b.dataset.tab; detail(view, { id, params: {} }); }));
   view.querySelector('#b-edit').onclick = () => modal({
     title: 'Editar veículo', size: 'xwide', body: veiculoForm(v), onOpen: (d) => wireForm(d, v),
-    onSubmit: async (d) => { await put('/veiculos/' + v.id, clean(d)); toast('Dados salvos.'); detail(view, { id, params: {} }); },
+    onSubmit: async (d) => { await put('/veiculos/' + v.id, clean(d)); await salvarFipePlaca(v.id, d); toast('Dados salvos.'); detail(view, { id, params: {} }); },
   });
   const reload = () => detail(view, { id, params: {} });
   const tab = view.querySelector('#tab');
@@ -328,7 +390,7 @@ export function fipeDialog(v, reload) {
 
 function tabFipe(el, v, reload) {
   el.innerHTML = `<div class="grid g-main"><section class="card"><div class="card-h"><h2>Histórico de valores FIPE</h2></div>
-    ${table([{ label: 'Consulta', html: (h) => dth(h.data) }, { label: 'Referência', key: 'referencia' }, { label: 'Origem', html: (h) => (h.origem === 'api' ? 'Tabela FIPE' : 'Manual') }, { label: 'Valor', num: true, html: (h) => brl(h.valor) }], v.fipe_historico, { empty: 'Nenhuma consulta registrada.' })}</section>
+    ${table([{ label: 'Consulta', html: (h) => dth(h.data) }, { label: 'Referência', key: 'referencia' }, { label: 'Origem', html: (h) => (h.origem === 'api' ? 'Tabela FIPE' : h.origem === 'placa' ? 'FIPE (placa)' : 'Manual') }, { label: 'Valor', num: true, html: (h) => brl(h.valor) }], v.fipe_historico, { empty: 'Nenhuma consulta registrada.' })}</section>
     <section class="card"><h2>Situação atual</h2>
       <div class="kv"><span>Valor FIPE</span><strong>${brl(v.fipe_valor)}</strong></div>
       <div class="kv"><span>Referência</span><strong>${esc(v.fipe_referencia || '–')}</strong></div>

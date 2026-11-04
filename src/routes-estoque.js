@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
-const { db, DATA_DIR } = require('./db');
+const { db, DATA_DIR, getSettings } = require('./db');
 const { today, diasEntre, descVeiculo } = require('./util');
 const { bad, pick } = require('./routes-cadastros');
 
@@ -218,6 +218,59 @@ module.exports = function (api, can) {
   api.get('/fipe/:tipo/marcas/:m/modelos/:mo/anos/:a', can('estoque'), async (req, res) => {
     const r = await fipeGet(`${tipoOk(req.params.tipo)}/marcas/${encodeURIComponent(req.params.m)}/modelos/${encodeURIComponent(req.params.mo)}/anos/${encodeURIComponent(req.params.a)}`);
     res.json({ ...r, valor_num: parseValor(r.Valor) });
+  });
+
+  // ---------- Consulta por placa (FIPE API v2 Parallelum, exige token) ----------
+  const FIPE_V2 = process.env.FIPE_API_V2 || 'https://fipe.parallelum.com.br/api/v2';
+  const titulo = (s) => String(s || '').toLowerCase().replace(/(^|[\s\-/(])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+  function combustivelDe(s) {
+    const t = String(s || '').toLowerCase();
+    if (/h[ií]brid/.test(t)) return 'Híbrido';
+    if (/el[eé]tric/.test(t)) return 'Elétrico';
+    if (/diesel/.test(t)) return 'Diesel';
+    if (/gnv|g[aá]s natural/.test(t)) return 'GNV';
+    if (/(álcool|alcool|etanol)/.test(t) && /gasolina/.test(t)) return 'Flex';
+    if (/flex/.test(t)) return 'Flex';
+    if (/(álcool|alcool|etanol)/.test(t)) return 'Etanol';
+    if (/gasolina/.test(t)) return 'Gasolina';
+    return '';
+  }
+  function mapPlaca(r) {
+    // "GM - CHEVROLET" -> "Chevrolet"; "SPIN 1.8L MT LTZ" -> modelo "Spin", versão "1.8L MT LTZ"
+    const marca = titulo(String(r.brand || '').split(' - ').pop().trim());
+    const partes = String(r.model || '').trim().split(/\s+/);
+    const ano = Number(r.year) || null;
+    return {
+      placa: r.plate,
+      categoria: /moto/i.test(r.segment || '') ? 'moto' : 'carro',
+      marca, modelo: titulo(partes[0] || ''), versao: partes.slice(1).join(' '),
+      ano_fab: ano, ano_mod: ano, cor: r.color || '', combustivel: combustivelDe(r.fuel),
+      chassi_final: r.chassis || '', municipio: [r.city, r.state].filter(Boolean).join('/'), importado: !!r.imported,
+      fipe: (r.fipePrices || []).map((p) => ({ codigo: p.codeFipe, modelo: p.model, valor: parseValor(p.price), preco: p.price })),
+    };
+  }
+  api.get('/fipe/placa/:placa', can('estoque'), async (req, res) => {
+    const placa = String(req.params.placa || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(placa)) throw bad('Placa inválida. Use o formato ABC1234 ou ABC1D23.');
+    const cache = db.prepare('SELECT resposta, consultado_em FROM placa_consultas WHERE placa=?').get(placa);
+    if (cache && req.query.atualizar !== '1') return res.json({ ...mapPlaca(JSON.parse(cache.resposta)), cache: true, consultado_em: cache.consultado_em });
+    const token = getSettings().fipe_token || process.env.FIPE_TOKEN;
+    if (!token) throw bad('Configure o token da FIPE API em Configurações para consultar por placa.');
+    let r;
+    try {
+      r = await fetch(`${FIPE_V2}/plates/${placa}`, { headers: { 'X-Subscription-Token': token, accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+    } catch (e) {
+      throw bad('Não foi possível consultar a placa agora. Verifique a conexão com a internet.', 502);
+    }
+    if (r.status === 401 || r.status === 403) throw bad('Token da FIPE API inválido ou sem permissão para consulta de placa. Confira em Configurações.', 502);
+    if (r.status === 429) throw bad('Limite diário de consultas de placa da FIPE API atingido. Tente amanhã ou preencha manualmente.', 429);
+    if (r.status === 404) throw bad('Placa não encontrada na base da FIPE API.', 404);
+    if (!r.ok) throw bad(`A FIPE API respondeu com erro (${r.status}). Tente novamente mais tarde.`, 502);
+    const j = await r.json();
+    if (!j || !j.brand) throw bad('Placa não encontrada na base da FIPE API.', 404);
+    db.prepare(`INSERT INTO placa_consultas(placa,resposta) VALUES (?,?) ON CONFLICT(placa) DO UPDATE SET resposta=excluded.resposta, consultado_em=datetime('now','localtime')`).run(placa, JSON.stringify(j));
+    const restante = r.headers.get('x-plate-quota-remaining');
+    res.json({ ...mapPlaca(j), cache: false, cota_restante: restante != null ? Number(restante) : null });
   });
 
   function salvarFipe(id, f) {
