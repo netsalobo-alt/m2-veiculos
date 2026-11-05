@@ -89,7 +89,9 @@ Para voltar a uma versão anterior, troque `latest` por `sha-xxxxxxx` (as tags a
 
 ## 6. Backup
 
-Tudo está no volume `m2seminovos_data`: o `m2.db` e a pasta `uploads/`.
+**Recomendado: backup automático no Google Drive**, feito pelo próprio sistema todo dia, com download em Configurações → Backup. Veja [BACKUP-GOOGLE-DRIVE.md](BACKUP-GOOGLE-DRIVE.md).
+
+Abaixo, a alternativa manual pelo servidor. Tudo está no volume `m2seminovos_data`: o `m2.db` e a pasta `uploads/`.
 
 **Backup a quente** (com o sistema rodando), pelo console do servidor:
 ```bash

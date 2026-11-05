@@ -139,6 +139,7 @@ require('./routes-financeiro')(api, can);
 require('./routes-site')(api, can);
 require('./routes-olx')(api, can);
 require('./routes-socios')(api, can);
+require('./backup').rotas(api, can);
 app.use('/api', api);
 
 // erros
@@ -158,5 +159,6 @@ app.get('/login', (req, res) => res.sendFile(path.join(PUB, 'login.html')));
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`[M2] Sistema rodando em http://localhost:${PORT}`));
+  require('./backup').agendar(); // backup diário (BACKUP_HORA)
 }
 module.exports = app;

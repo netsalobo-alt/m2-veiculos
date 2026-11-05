@@ -6,6 +6,11 @@
 #   ADMIN_EMAIL     (opcional)    e-mail do administrador; padrão admin@m2seminovos.com.br
 #   PORTA           (opcional)    porta do servidor onde o sistema vai responder; padrão 3000
 #   FIPE_TOKEN      (opcional)    token da FIPE API para a consulta por placa (também pode ir em Configurações)
+#   BACKUP_GDRIVE_TOKEN (opcional) autorização do Google Drive para enviar os backups (veja docs/BACKUP-GOOGLE-DRIVE.md)
+#   BACKUP_GDRIVE_CLIENT_ID / BACKUP_GDRIVE_CLIENT_SECRET (opcionais) chave própria do Google Cloud usada para gerar o token
+#   BACKUP_HORA     (opcional)    horário do backup diário; padrão 03:00
+#   BACKUP_DIAS     (opcional)    quantos dias de backup manter no Google Drive; padrão 30
+#   BACKUP_PASTA    (opcional)    pasta no Google Drive; padrão M2-Backups
 services:
   m2:
     image: ghcr.io/netsalobo-alt/m2-veiculos:latest
@@ -18,6 +23,12 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@m2seminovos.com.br}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Defina ADMIN_PASSWORD nas variaveis da stack}
       FIPE_TOKEN: ${FIPE_TOKEN:-}
+      BACKUP_GDRIVE_TOKEN: ${BACKUP_GDRIVE_TOKEN:-}
+      BACKUP_GDRIVE_CLIENT_ID: ${BACKUP_GDRIVE_CLIENT_ID:-}
+      BACKUP_GDRIVE_CLIENT_SECRET: ${BACKUP_GDRIVE_CLIENT_SECRET:-}
+      BACKUP_HORA: ${BACKUP_HORA:-03:00}
+      BACKUP_DIAS: ${BACKUP_DIAS:-30}
+      BACKUP_PASTA: ${BACKUP_PASTA:-M2-Backups}
     volumes:
       # banco SQLite (m2.db) e fotos (uploads). NÃO apague este volume: é onde ficam todos os dados.
       - m2data:/app/data

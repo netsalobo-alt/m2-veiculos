@@ -1,4 +1,36 @@
-import { get, put, post, esc, toast, fail, field, selectField, areaField, modal, confirmDlg } from '../core.js';
+import { get, put, post, esc, toast, fail, field, selectField, areaField, modal, confirmDlg, can, pill, dth, icon } from '../core.js';
+
+const tam = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+const quando = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '–');
+
+// cartão de backup (só administradores)
+async function backupCard(view) {
+  const box = view.querySelector('#bkp-body'); if (!box) return;
+  const b = await get('/backup');
+  const u = b.ultimo;
+  const okRemoto = u && u.remoto === 'ok', erro = u && (u.local !== 'ok' || u.remoto === 'erro');
+  view.querySelector('#bkp-pill').innerHTML = !u ? pill('Nenhum backup ainda', 'warn') : erro ? pill('Último backup com erro', 'bad') : pill(okRemoto ? `Ok · enviado ao ${b.config.remoto}` : 'Ok · só no servidor', okRemoto ? 'ok' : 'warn');
+  box.innerHTML = `<p class="muted" style="margin:-6px 0 10px">Cópia do banco e das fotos ${b.config.automatico ? `feita sozinha todo dia às <strong>${esc(b.config.hora)}</strong>` : '(automático desligado)'}.
+      ${b.config.remoto ? `Enviada para <strong>${esc(b.config.remoto)}</strong>, pasta <strong>${esc(b.config.pasta)}</strong>, que guarda os últimos ${b.config.dias_remoto} dias.` : 'Nenhum destino externo configurado: as cópias ficam só no servidor. Veja em docs/BACKUP-GOOGLE-DRIVE.md como enviar ao Google Drive.'}
+      O servidor guarda as últimas ${b.config.copias_locais} cópias.</p>
+    ${u ? `<div class="kv"><span>Último backup</span><strong>${quando(u.data)} · ${esc(u.origem)}${u.tamanho ? ' · ' + tam(u.tamanho) : ''}</strong></div>
+      <div class="kv"><span>${esc(b.config.remoto || 'Destino externo')}</span><strong>${u.remoto === 'ok' ? '✓ enviado' : u.remoto === 'erro' ? '✗ falhou' : 'não configurado'}</strong></div>` : ''}
+    ${u && u.mensagem ? `<div class="alert" style="margin-top:10px">${esc(u.mensagem)}</div>` : ''}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 6px"><button type="button" class="btn" id="bkp-now">${icon('refresh')}Fazer backup agora</button></div>
+    ${b.arquivos.length ? `<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Cópias no servidor</th><th class="num">Tamanho</th><th></th></tr></thead><tbody>
+      ${b.arquivos.map((a) => `<tr><td>${quando(a.criado_em)}<div class="t2">${esc(a.arquivo)}</div></td><td class="num">${tam(a.tamanho)}</td><td class="right"><a class="btn sm ghost" href="/api/backup/baixar/${encodeURIComponent(a.arquivo)}">${icon('pdf')}Baixar</a></td></tr>`).join('')}
+      </tbody></table></div>` : ''}`;
+  const bt = box.querySelector('#bkp-now');
+  bt.onclick = async () => {
+    bt.disabled = true; bt.textContent = 'Fazendo backup…';
+    try {
+      const r = await post('/backup/agora');
+      if (r.local !== 'ok' || r.remoto === 'erro') toast(r.mensagem || 'O backup teve um problema.', true);
+      else toast(r.remoto === 'ok' ? 'Backup feito e enviado.' : 'Backup feito no servidor.');
+    } catch (e) { fail(e); }
+    backupCard(view).catch(fail);
+  };
+}
 import { setCrumbs } from '../main.js';
 
 const OLX_MSG = {
@@ -40,6 +72,7 @@ export async function render(view, { params = {} } = {}) {
         <button type="button" class="btn" id="olx-con">${olx.conectado ? 'Reconectar com a OLX' : 'Conectar com a OLX'}</button>
         ${olx.conectado ? '<button type="button" class="btn ghost" id="olx-des">Desconectar</button>' : ''}
       </div></div></section>
+    ${can('usuarios') ? '<section class="card" id="bkp"><div class="card-h"><h2>Backup</h2><span id="bkp-pill"></span></div><div id="bkp-body"><div class="empty" style="padding:16px">Carregando…</div></div></section>' : ''}
     <div class="form-actions"><button class="btn" type="submit">Salvar configurações</button></div>
   </form>`;
   const f = view.querySelector('#f');
@@ -51,6 +84,7 @@ export async function render(view, { params = {} } = {}) {
     if (!d.olx_client_id || !d.olx_client_secret) { toast('Preencha o Client ID e o Client Secret enviados pela OLX.', true); return; }
     try { await put('/config', d); location.href = '/api/olx/conectar'; } catch (err) { fail(err); }
   };
+  if (can('usuarios')) backupCard(view).catch(fail);
   const des = view.querySelector('#olx-des');
   if (des) des.onclick = async () => { if (await confirmDlg('Desconectar a conta da OLX? Os anúncios já publicados continuam na OLX.', 'Desconectar')) { await post('/olx/desconectar'); toast('Conta da OLX desconectada.'); render(view, {}); } };
   view.querySelector('#teste').onclick = () => modal({
