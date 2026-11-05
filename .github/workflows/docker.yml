@@ -49,8 +49,13 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           docker buildx build --load -t m2-teste .
-          docker run -d --name m2 -e ADMIN_PASSWORD=teste123 -p 3000:3000 m2-teste
+          # destino de backup "local" no lugar do Google Drive, para testar o rclone da imagem
+          docker run -d --name m2 -e ADMIN_PASSWORD=teste123 -e BACKUP_RCLONE_REMOTE=destino -e RCLONE_CONFIG_DESTINO_TYPE=local -e BACKUP_PASTA=/app/data/remoto -p 3000:3000 m2-teste
           for i in $(seq 1 30); do curl -fs http://localhost:3000/api/public/empresa && break; sleep 1; done
           curl -fs http://localhost:3000/ > /dev/null
-          curl -fs -X POST -H 'content-type: application/json' -d '{"email":"admin@m2seminovos.com.br","senha":"teste123"}' http://localhost:3000/api/login
+          curl -fs -c cj.txt -X POST -H 'content-type: application/json' -d '{"email":"admin@m2seminovos.com.br","senha":"teste123"}' http://localhost:3000/api/login
+          echo; echo "--- backup"
+          curl -fs -b cj.txt -X POST http://localhost:3000/api/backup/agora | tee backup.json
+          grep -q '"local":"ok"' backup.json && grep -q '"remoto":"ok"' backup.json
+          docker exec m2 ls -la /app/data/remoto
           docker logs m2

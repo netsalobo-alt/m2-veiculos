@@ -13,7 +13,8 @@ ENV NODE_ENV=production \
     DATA_DIR=/app/data \
     TZ=America/Sao_Paulo
 # tzdata: datas e "hoje" no fuso do Brasil · tini: encerra o processo corretamente ao parar o container
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata tini && rm -rf /var/lib/apt/lists/*
+# rclone + ca-certificates: envio dos backups ao Google Drive (ou outro destino)
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata tini rclone ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --chown=node:node . .
