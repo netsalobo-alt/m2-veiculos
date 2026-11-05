@@ -1,0 +1,56 @@
+# Monta a imagem Docker a cada atualização.
+# - Pull request: só monta (confere se o Dockerfile funciona).
+# - Push no main: monta e publica em ghcr.io/netsalobo-alt/m2-veiculos (tags latest e sha-xxxxxxx).
+name: Imagem Docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Login no GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+      - name: Montar (e publicar no main)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Testar a imagem (sobe o container e chama o site)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker buildx build --load -t m2-teste .
+          docker run -d --name m2 -e ADMIN_PASSWORD=teste123 -p 3000:3000 m2-teste
+          for i in $(seq 1 30); do curl -fs http://localhost:3000/api/public/empresa && break; sleep 1; done
+          curl -fs http://localhost:3000/ > /dev/null
+          curl -fs -X POST -H 'content-type: application/json' -d '{"email":"admin@m2seminovos.com.br","senha":"teste123"}' http://localhost:3000/api/login
+          docker logs m2

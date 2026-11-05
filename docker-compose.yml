@@ -1,0 +1,32 @@
+# Stack do Portainer – M2 Seminovos
+# Passo a passo em docs/PORTAINER.md
+#
+# Variáveis (em Portainer → Stacks → "Environment variables"):
+#   ADMIN_PASSWORD  (obrigatória) senha do administrador criada na PRIMEIRA execução
+#   ADMIN_EMAIL     (opcional)    e-mail do administrador; padrão admin@m2seminovos.com.br
+#   PORTA           (opcional)    porta do servidor onde o sistema vai responder; padrão 3000
+#   FIPE_TOKEN      (opcional)    token da FIPE API para a consulta por placa (também pode ir em Configurações)
+services:
+  m2:
+    image: ghcr.io/netsalobo-alt/m2-veiculos:latest
+    container_name: m2-seminovos
+    restart: unless-stopped
+    ports:
+      - "${PORTA:-3000}:3000"
+    environment:
+      TZ: America/Sao_Paulo
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@m2seminovos.com.br}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Defina ADMIN_PASSWORD nas variaveis da stack}
+      FIPE_TOKEN: ${FIPE_TOKEN:-}
+    volumes:
+      # banco SQLite (m2.db) e fotos (uploads). NÃO apague este volume: é onde ficam todos os dados.
+      - m2data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  m2data:
+    name: m2seminovos_data
