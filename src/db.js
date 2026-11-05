@@ -159,6 +159,34 @@ CREATE INDEX IF NOT EXISTS ix_lanc_venc ON lancamentos(vencimento);
 CREATE INDEX IF NOT EXISTS ix_veic_status ON veiculos(status);
 `);
 
+// ---------- sócios e capital por veículo ----------
+db.exec(`
+CREATE TABLE IF NOT EXISTS socios (
+  id INTEGER PRIMARY KEY,
+  nome TEXT NOT NULL, cpf_cnpj TEXT, telefone TEXT, email TEXT, pix TEXT, observacoes TEXT,
+  loja INTEGER NOT NULL DEFAULT 0,          -- 1 = "Caixa da loja" (capital da própria empresa)
+  ativo INTEGER NOT NULL DEFAULT 1,
+  criado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS veiculo_aportes (
+  id INTEGER PRIMARY KEY,
+  veiculo_id INTEGER NOT NULL REFERENCES veiculos(id) ON DELETE CASCADE,
+  socio_id INTEGER NOT NULL REFERENCES socios(id),
+  referente TEXT NOT NULL DEFAULT 'compra',  -- compra | custo | outro
+  custo_id INTEGER REFERENCES veiculo_custos(id) ON DELETE CASCADE,
+  valor REAL NOT NULL, data TEXT, descricao TEXT,
+  criado_por INTEGER REFERENCES users(id),
+  criado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_aportes_veic ON veiculo_aportes(veiculo_id);
+CREATE INDEX IF NOT EXISTS ix_aportes_socio ON veiculo_aportes(socio_id);
+`);
+// colunas novas no caixa: de qual sócio é o lançamento e de qual aporte ele nasceu
+const colsLanc = db.prepare('PRAGMA table_info(lancamentos)').all().map((c) => c.name);
+if (!colsLanc.includes('socio_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN socio_id INTEGER REFERENCES socios(id)');
+if (!colsLanc.includes('aporte_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN aporte_id INTEGER REFERENCES veiculo_aportes(id) ON DELETE CASCADE');
+if (!db.prepare('SELECT 1 FROM socios WHERE loja=1').get()) db.prepare("INSERT INTO socios(nome,loja) VALUES ('Caixa da loja',1)").run();
+
 // ---------- seed básico ----------
 const DEFAULT_SETTINGS = {
   empresa_nome: 'M2 Seminovos',

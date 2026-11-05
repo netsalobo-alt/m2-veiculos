@@ -208,7 +208,7 @@ export async function detail(view, { id, params }) {
   if (params.tab) tabAtual = params.tab;
   const custo = can('custos');
   const capa = v.fotos[0];
-  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`]] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length})`], ...(v.categoria !== 'bike' ? [['olx', 'OLX']] : [])];
+  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`], ['investimento', 'Investimento']] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length})`], ...(v.categoria !== 'bike' ? [['olx', 'OLX']] : [])];
   if (!tabs.find((t) => t[0] === tabAtual)) tabAtual = 'resumo';
 
   view.innerHTML = `<div class="ph"><div class="vhead">
@@ -229,7 +229,74 @@ export async function detail(view, { id, params }) {
   });
   const reload = () => detail(view, { id, params: {} });
   const tab = view.querySelector('#tab');
-  ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: tabDocs, olx: tabOlx })[tabAtual](tab, v, reload);
+  ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: tabDocs, olx: tabOlx, investimento: tabInvest })[tabAtual](tab, v, reload);
+}
+
+// ------------------------------------------------------------------ investimento (capital por sócio)
+const neg = (n) => (n < 0 ? 'neg' : n > 0 ? 'pos' : '');
+const pc1 = (n) => `${Number(n || 0).toFixed(1).replace('.', ',')}%`;
+async function tabInvest(el, v, reload) {
+  el.innerHTML = '<div class="empty">Carregando…</div>';
+  const [d, socios] = await Promise.all([get(`/veiculos/${v.id}/investimento`), get('/socios?simples=1')]);
+  const vendido = !!d.venda;
+  const loja = d.socios.find((s) => s.loja);
+  const REF = { compra: 'Compra do veículo', custo: 'Custo', outro: 'Outro' };
+  el.innerHTML = `<div class="grid g4">
+      <div class="kpi dark"><div class="k">Capital do carro</div><div class="v">${brl(d.capital)}</div><div class="s">compra ${brl(d.veiculo.valor_compra)} + custos ${brl(d.veiculo.custos_total)}</div></div>
+      <div class="kpi"><div class="k">Aportado por sócios</div><div class="v">${brl(d.socios.filter((s) => !s.loja).reduce((t, s) => t + s.aporte, 0))}</div><div class="s">${d.socios.filter((s) => !s.loja).length} sócio(s)</div></div>
+      <div class="kpi"><div class="k">Caixa da loja</div><div class="v">${brl(loja ? loja.aporte : 0)}</div><div class="s">${d.nao_atribuido ? `${brl(d.nao_atribuido)} sem sócio definido` : 'tudo atribuído'}</div></div>
+      <div class="kpi"><div class="k">${vendido ? 'Resultado da venda' : 'Lucro previsto'}</div><div class="v ${neg(vendido ? d.resultado : d.resultado_previsto)}">${brl(vendido ? d.resultado : d.resultado_previsto)}</div>
+        <div class="s">${vendido ? `venda ${brl(d.venda.valor)} − capital − comissão ${brl(d.venda.comissao)}` : d.veiculo.preco_venda ? `pelo preço anunciado ${brl(d.veiculo.preco_venda)}` : 'informe o preço de venda'}</div></div></div>
+    ${d.excedente ? `<div class="alert" style="margin-top:16px">Os aportes somam ${brl(d.excedente)} a mais que o capital do carro. A divisão usa o total aportado como base. Confira se algum aporte foi lançado em dobro.</div>` : ''}
+    <div class="card" style="margin-top:18px"><div class="card-h"><h2>Divisão por sócio</h2></div>
+    ${table([
+      { label: 'Sócio', html: (s) => `<div class="t1">${esc(s.nome)} ${s.loja ? pill('Empresa', 'dark') : ''}</div>${s.nao_atribuido ? `<div class="t2">inclui ${brl(s.nao_atribuido)} sem sócio definido</div>` : ''}` },
+      { label: 'Aporte', num: true, html: (s) => `<strong>${brl(s.aporte)}</strong>` },
+      { label: 'Participação', num: true, html: (s) => pc1(s.participacao) },
+      { label: vendido ? 'Lucro' : 'Lucro previsto', num: true, html: (s) => { const x = vendido ? s.lucro : s.lucro_previsto; return x == null ? '<span class="muted">–</span>' : `<span class="${neg(x)}">${brl(x)}</span>`; } },
+      ...(vendido ? [{ label: 'Retorno', num: true, html: (s) => brl(s.retorno) }, { label: 'Repassado', num: true, html: (s) => (s.loja ? '–' : brl(s.repassado)) },
+        { label: 'A repassar', num: true, html: (s) => (s.loja ? '<span class="muted">fica na loja</span>' : s.a_repassar > 0.009 ? `<strong class="gold">${brl(s.a_repassar)}</strong>` : pill('Quitado', 'ok')) }] : []),
+    ], d.socios, { empty: 'Sem capital neste veículo ainda (informe o valor de compra).' })}
+    <p class="hint" style="margin:12px 0 0">Participação = aporte ÷ capital do carro. O lucro${vendido ? '' : ' (quando vender)'} é dividido nessa proporção, depois de descontar a comissão do vendedor. ${vendido && d.socios.some((s) => !s.loja && s.a_repassar > 0.009) ? 'Registre os repasses na ficha de cada sócio (Financeiro → Sócios e investimentos).' : ''}</p></div>
+    <div class="card" style="margin-top:18px"><div class="card-h"><h2>Aportes</h2><button class="btn sm" id="ap-add" ${socios.filter((s) => !s.loja && s.ativo).length ? '' : 'disabled'}>${icon('plus')}Registrar aporte</button></div>
+    ${socios.filter((s) => !s.loja).length ? '' : `<div class="alert info">Nenhum sócio cadastrado. ${can('financeiro') ? '<a class="linkbtn" href="#/socios">Cadastre os sócios</a> para registrar aportes.' : 'Peça ao financeiro para cadastrar os sócios.'}</div>`}
+    ${table([
+      { label: 'Data', html: (a) => dt(a.data) },
+      { label: 'Sócio', html: (a) => esc(a.socio_nome) },
+      { label: 'Referente a', html: (a) => esc(a.referente === 'custo' ? `Custo: ${a.custo_categoria || ''}` : REF[a.referente] || a.referente) },
+      { label: 'Descrição', html: (a) => esc(a.descricao || '') },
+      { label: 'No caixa', html: (a) => (a.lancamento_id ? pill('Entrada lançada', 'ok') : a.loja ? '<span class="muted">–</span>' : pill('Não lançado')) },
+      { label: 'Valor', num: true, html: (a) => `<strong>${brl(a.valor)}</strong>` },
+      { label: '', cls: 'nowrap right', html: (a) => (a.custo_id ? '<span class="t2">editar na aba Custos</span>' : '<button class="btn sm ghost" data-ed>Editar</button> <button class="btn sm danger" data-rm>Excluir</button>') },
+    ], d.aportes, { empty: 'Nenhum aporte registrado. Todo o capital deste carro está contando como do caixa da loja.' })}
+    <p class="hint" style="margin:12px 0 0">Custos pagos por um sócio entram aqui sozinhos: ao lançar o custo, escolha quem pagou em <strong>Pago por</strong>.</p></div>`;
+
+  const form = (a) => modal({
+    title: a ? 'Editar aporte' : 'Registrar aporte', size: 'wide',
+    body: `<div class="form-grid">
+      ${selectField('Sócio', 'socio_id', socios.filter((s) => !s.loja && (s.ativo || (a && a.socio_id === s.id))).map((s) => [s.id, s.nome]), a ? a.socio_id : '', { cls: 'c6', empty: 'Escolha…' })}
+      ${selectField('Referente a', 'referente', { compra: 'Compra do veículo', outro: 'Outro (ex.: reforço de capital)' }, a ? a.referente : 'compra', { cls: 'c6' })}
+      ${moneyField('Valor', 'valor', a ? a.valor : d.nao_atribuido || null, { cls: 'c4', hint: a ? '' : d.nao_atribuido ? `Sugestão: ${brl(d.nao_atribuido)} ainda sem sócio.` : '' })}
+      ${field('Data', 'data', a ? a.data : v.data_entrada || today(), { type: 'date', cls: 'c4' })}
+      ${field('Descrição (opcional)', 'descricao', a && a.descricao, { cls: 'c4', attrs: 'placeholder="Ex.: metade da compra"' })}
+      <label class="check c12"><input type="checkbox" name="lancar_caixa" ${!a || a.lancamento_id ? 'checked' : ''}> Lançar no caixa como entrada "Aporte de sócios"</label>
+      <p class="hint c12">Deixe marcado quando o dinheiro passou pelo caixa da loja ou quando o sócio pagou direto ao vendedor (a compra já saiu do caixa, e esta entrada compensa). Desmarque só se a compra não foi lançada no caixa.</p></div>`,
+    onSubmit: async (f) => {
+      if (!f.socio_id) throw new Error('Escolha o sócio.');
+      if (!(f.valor > 0)) throw new Error('Informe o valor.');
+      if (a) await put('/aportes/' + a.id, f); else await post(`/veiculos/${v.id}/aportes`, f);
+      toast('Aporte salvo.'); reload();
+    },
+  });
+  const add = el.querySelector('#ap-add'); if (add) add.onclick = () => form(null);
+  const cards = el.querySelectorAll('.card');
+  const tb = cards[cards.length - 1];
+  tb.querySelectorAll('tbody tr').forEach((tr, i) => {
+    const a = d.aportes[i];
+    const e = tr.querySelector('[data-ed]'); if (e) e.onclick = () => form(a);
+    const r = tr.querySelector('[data-rm]');
+    if (r) r.onclick = async () => { if (!(await confirmDlg('Excluir este aporte? A entrada no caixa (se houver) também sai.', 'Excluir'))) return; try { await del('/aportes/' + a.id); toast('Aporte excluído.'); reload(); } catch (err) { fail(err); } };
+  });
 }
 
 // ------------------------------------------------------------------ OLX
@@ -383,7 +450,10 @@ function tabResumo(el, v, reload) {
   });
 }
 
-function custoForm(v, c, reload) {
+async function custoForm(v, c, reload) {
+  let socios = [];
+  try { socios = await get('/socios?simples=1'); } catch (e) { /* sem sócios: só caixa da loja */ }
+  const opcSocio = socios.filter((s) => s.ativo || (c && c.pago_por === s.id)).map((s) => [s.loja ? '' : s.id, s.nome]);
   modal({
     title: c ? 'Editar custo' : 'Lançar custo', size: 'wide',
     body: `<div class="form-grid">${field('Data', 'data', c ? c.data : today(), { type: 'date', cls: 'c3' })}
@@ -392,7 +462,8 @@ function custoForm(v, c, reload) {
       <label class="check c3" style="margin-top:42px"><input type="checkbox" name="pago" ${!c || c.lanc_status === 'pago' ? 'checked' : ''}> Já pago</label>
       ${field('Descrição', 'descricao', c && c.descricao, { cls: 'c8', attrs: 'placeholder="Ex.: troca de pastilhas e discos"' })}
       ${field('Fornecedor / oficina', 'fornecedor', c && c.fornecedor, { cls: 'c4' })}
-      <p class="hint c12">O custo entra no cálculo de margem do veículo e gera uma saída no fluxo de caixa (paga ou a pagar).</p></div>`,
+      ${opcSocio.length > 1 ? selectField('Pago por', 'pago_por', opcSocio, c && c.pago_por ? c.pago_por : '', { cls: 'c6' }) : ''}
+      <p class="hint c12">O custo entra no cálculo de margem do veículo e gera uma saída no fluxo de caixa (paga ou a pagar).${opcSocio.length > 1 ? ' Se um sócio pagou, ele vira aporte desse sócio no carro.' : ''}</p></div>`,
     onSubmit: async (d) => {
       if (c) await put('/custos/' + c.id, d); else await post(`/veiculos/${v.id}/custos`, d);
       toast('Custo salvo.'); tabAtual = 'custos'; reload();
@@ -406,9 +477,10 @@ function tabCustos(el, v, reload) {
     ${table([
       { label: 'Data', html: (c) => dt(c.data) }, { label: 'Categoria', key: 'categoria' }, { label: 'Descrição', key: 'descricao' }, { label: 'Fornecedor', key: 'fornecedor' },
       { label: 'Pagamento', html: (c) => (c.lanc_status === 'pago' ? pill('Pago', 'ok') : pill('A pagar', 'warn')) },
+      { label: 'Pago por', html: (c) => esc(c.pago_por_nome || 'Caixa da loja') },
       { label: 'Valor', num: true, html: (c) => brl(c.valor) },
       { label: '', html: () => '<button class="btn sm ghost" data-ed>Editar</button> <button class="btn sm danger" data-rm>Excluir</button>', cls: 'nowrap right' },
-    ], rows, { empty: 'Nenhum custo lançado para este veículo.', foot: rows.length ? ['Total', '', '', '', '', brl(v.custos_total), ''] : null })}</div>
+    ], rows, { empty: 'Nenhum custo lançado para este veículo.', foot: rows.length ? ['Total', '', '', '', '', '', brl(v.custos_total), ''] : null })}</div>
     <div class="grid g3" style="margin-top:18px">
       <div class="kpi"><div class="k">Compra</div><div class="v">${brl(v.valor_compra)}</div></div>
       <div class="kpi"><div class="k">Custos</div><div class="v">${brl(v.custos_total)}</div></div>

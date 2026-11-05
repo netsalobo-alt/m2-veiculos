@@ -138,6 +138,7 @@ require('./routes-vendas')(api, can);
 require('./routes-financeiro')(api, can);
 require('./routes-site')(api, can);
 require('./routes-olx')(api, can);
+require('./routes-socios')(api, can);
 app.use('/api', api);
 
 // erros
