@@ -98,7 +98,8 @@ module.exports = function (api, can) {
     if (!v) return res.status(404).json({ error: 'Veículo não encontrado.' });
     const out = enrich(v);
     out.fotos = db.prepare('SELECT id,arquivo,ordem FROM veiculo_fotos WHERE veiculo_id=? ORDER BY ordem,id').all(v.id);
-    out.custos = db.prepare(`SELECT c.*, l.status lanc_status FROM veiculo_custos c LEFT JOIN lancamentos l ON l.custo_id=c.id WHERE c.veiculo_id=? ORDER BY c.data DESC, c.id DESC`).all(v.id);
+    out.custos = db.prepare(`SELECT c.*, l.status lanc_status, a.socio_id pago_por, s.nome pago_por_nome FROM veiculo_custos c LEFT JOIN lancamentos l ON l.custo_id=c.id
+      LEFT JOIN veiculo_aportes a ON a.custo_id=c.id LEFT JOIN socios s ON s.id=a.socio_id WHERE c.veiculo_id=? ORDER BY c.data DESC, c.id DESC`).all(v.id);
     out.fipe_historico = db.prepare('SELECT * FROM fipe_historico WHERE veiculo_id=? ORDER BY data DESC').all(v.id);
     out.venda = db.prepare(`SELECT s.*, p.nome cliente_nome FROM vendas s JOIN pessoas p ON p.id=s.cliente_id WHERE s.veiculo_id=? AND s.status='concluida'`).get(v.id) || null;
     out.documentos = db.prepare('SELECT id,titulo,tipo,status,criado_em,assinado_em FROM documentos WHERE veiculo_id=? ORDER BY id DESC').all(v.id);
@@ -181,6 +182,7 @@ module.exports = function (api, can) {
         .run(req.params.id, data || today(), categoria || 'Outros', descricao || '', fornecedor || '', Number(valor));
       const c = db.prepare('SELECT * FROM veiculo_custos WHERE id=?').get(r.lastInsertRowid);
       syncCustoLancamento(c, pago !== false && pago !== 0, req.user.id);
+      require('./routes-socios').syncAporteCusto(c, Number(req.body.pago_por) || null, req.user.id); // sócio que pagou o custo
       return c.id;
     })();
     res.json({ id });
@@ -192,6 +194,7 @@ module.exports = function (api, can) {
         .run(data || today(), categoria, descricao, fornecedor, Number(valor) || 0, req.params.cid);
       const c = db.prepare('SELECT * FROM veiculo_custos WHERE id=?').get(req.params.cid);
       if (c) syncCustoLancamento(c, pago == null ? null : !!pago, req.user.id);
+      if (c && req.body.pago_por !== undefined) require('./routes-socios').syncAporteCusto(c, Number(req.body.pago_por) || null, req.user.id);
     })();
     res.json({ ok: true });
   });

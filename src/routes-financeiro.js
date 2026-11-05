@@ -6,7 +6,7 @@ const { relatorioPDF } = require('./pdf');
 
 const CATS = {
   entrada: ['Venda de veículos', 'Retorno de financiamento', 'Serviços / despachante', 'Aporte de sócios', 'Empréstimos', 'Outras receitas'],
-  saida: ['Compra de veículos', 'Custos de veículos', 'Comissões', 'Aluguel', 'Salários e encargos', 'Pró-labore', 'Impostos e taxas', 'Marketing e anúncios', 'Água, luz e internet', 'Despachante / documentação', 'Tarifas bancárias', 'Manutenção da loja', 'Outras despesas'],
+  saida: ['Compra de veículos', 'Custos de veículos', 'Comissões', 'Repasse a sócios', 'Aluguel', 'Salários e encargos', 'Pró-labore', 'Impostos e taxas', 'Marketing e anúncios', 'Água, luz e internet', 'Despachante / documentação', 'Tarifas bancárias', 'Manutenção da loja', 'Outras despesas'],
 };
 const firstOfMonth = () => today().slice(0, 8) + '01';
 const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(1).replace('.', ',')}%` : '–');
