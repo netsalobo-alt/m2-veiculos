@@ -1,3 +1,13 @@
 node_modules
 data
 .git
+.github
+.claude
+docs
+telas
+*.log
+.env
+.env.*
+.DS_Store
+m2-veiculos.zip
+docker-compose*.yml

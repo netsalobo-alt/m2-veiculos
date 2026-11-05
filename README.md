@@ -60,7 +60,8 @@ Em **Configurações**:
 O sistema é um único processo Node com banco SQLite em `data/` (banco `m2.db` e fotos em `data/uploads`).
 
 - **VPS / servidor próprio**: `npm install --omit=dev` e `npm start` com PM2 ou systemd, atrás de Nginx com HTTPS.
-- **Docker**: `docker build -t m2-seminovos .` e `docker run -p 3000:3000 -v m2data:/app/data m2-seminovos`.
+- **Portainer / Docker Compose**: guia passo a passo em [docs/PORTAINER.md](docs/PORTAINER.md). A imagem é publicada pelo GitHub em `ghcr.io/netsalobo-alt/m2-veiculos:latest` a cada atualização do `main`, e a stack usa o [`docker-compose.yml`](docker-compose.yml).
+- **Docker**: `docker build -t m2-seminovos .` e `docker run -p 3000:3000 -e ADMIN_PASSWORD=sua-senha -v m2data:/app/data m2-seminovos`.
 - **Render / Railway / Fly.io**: use um **disco persistente** montado em `/app/data` (ou defina `DATA_DIR`).
 
 Variáveis: `PORT` (padrão 3000), `DATA_DIR` (padrão `./data`), `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `FIPE_API` (padrão `https://parallelum.com.br/fipe/api/v1`).
