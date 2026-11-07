@@ -110,6 +110,17 @@ function lancarAporte(ap, userId) {
   else db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,conta_id,veiculo_id,socio_id,aporte_id,criado_por)
     VALUES ('entrada',?,'Aporte de sócios',?,?,?,'pago',?,?,?,?,?)`).run(desc, ap.valor, dt, dt, contaDoAporte(ap), ap.veiculo_id, ap.socio_id, ap.id, userId);
 }
+// o total aportado num veículo não pode passar do capital dele (valor de compra + custos lançados)
+function checarLimite(veiculoId, valor, ignorarAporteId = null) {
+  const d = divisao(veiculoId);
+  const outros = r2(db.prepare('SELECT COALESCE(SUM(valor),0) t FROM veiculo_aportes WHERE veiculo_id=? AND id IS NOT ?').get(veiculoId, ignorarAporteId).t);
+  const livre = r2(Math.max(0, d.capital - outros));
+  if (r2(valor) > livre + 0.009) {
+    throw bad(livre > 0
+      ? `O aporte passa do capital do veículo. Capital (compra + custos): ${brl(d.capital)}; já aportado: ${brl(outros)}; ainda disponível: ${brl(livre)}.`
+      : `O veículo já está todo coberto por aportes (capital ${brl(d.capital)}). Para aportar mais, lance antes a compra ou o custo que o sócio pagou.`);
+  }
+}
 function validarAporte(b) {
   const s = getSocio(b.socio_id);
   if (!s || !s.ativo) throw bad('Escolha o sócio.');
@@ -158,6 +169,7 @@ function pagarPorSocio(l, socioId, modo, userId) {
       return;
     }
     if (v) {
+      checarLimite(v.id, l.valor);
       const id = db.prepare('INSERT INTO veiculo_aportes(veiculo_id,socio_id,referente,valor,data,descricao,criado_por,lancamento_id) VALUES (?,?,?,?,?,?,?,?)')
         .run(v.id, s.id, l.categoria === 'Compra de veículos' ? 'compra' : 'outro', r2(l.valor), dt, `Pagou: ${l.descricao}`.slice(0, 200), userId, l.id).lastInsertRowid;
       lancarAporte(db.prepare('SELECT * FROM veiculo_aportes WHERE id=?').get(id), userId);
@@ -254,6 +266,7 @@ module.exports = function (api, can) {
     const b = req.body || {};
     const v = db.prepare('SELECT id FROM veiculos WHERE id=?').get(req.params.id); if (!v) return res.status(404).json({ error: 'Veículo não encontrado.' });
     const s = validarAporte(b);
+    checarLimite(v.id, b.valor);
     const referente = ['compra', 'outro'].includes(b.referente) ? b.referente : 'compra';
     const id = db.transaction(() => {
       const r = db.prepare('INSERT INTO veiculo_aportes(veiculo_id,socio_id,referente,valor,data,descricao,criado_por) VALUES (?,?,?,?,?,?,?)')
@@ -268,6 +281,7 @@ module.exports = function (api, can) {
     if (a.custo_id) throw bad('Este aporte vem de um custo. Edite o custo na aba Custos.');
     const b = req.body || {};
     const s = validarAporte(b);
+    checarLimite(a.veiculo_id, b.valor, a.id);
     db.transaction(() => {
       db.prepare('UPDATE veiculo_aportes SET socio_id=?, referente=?, valor=?, data=?, descricao=? WHERE id=?')
         .run(s.id, ['compra', 'outro'].includes(b.referente) ? b.referente : a.referente, r2(b.valor), b.data || a.data, String(b.descricao || '').slice(0, 200) || null, a.id);

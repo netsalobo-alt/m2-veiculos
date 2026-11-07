@@ -291,7 +291,7 @@ async function tabInvest(el, v, reload) {
       <div class="kpi"><div class="k">Caixa da loja</div><div class="v">${brl(loja ? loja.aporte : 0)}</div><div class="s">${d.nao_atribuido ? `${brl(d.nao_atribuido)} sem sócio definido` : 'tudo atribuído'}</div></div>
       <div class="kpi"><div class="k">${vendido ? 'Resultado da venda' : 'Lucro previsto'}</div><div class="v ${neg(vendido ? d.resultado : d.resultado_previsto)}">${brl(vendido ? d.resultado : d.resultado_previsto)}</div>
         <div class="s">${vendido ? `venda ${brl(d.venda.valor)} − capital − comissão ${brl(d.venda.comissao)}` : d.veiculo.preco_venda ? `pelo preço anunciado ${brl(d.veiculo.preco_venda)}` : 'informe o preço de venda'}</div></div></div>
-    ${d.excedente ? `<div class="alert" style="margin-top:16px">Os aportes somam ${brl(d.excedente)} a mais que o capital do carro. A divisão usa o total aportado como base. Confira se algum aporte foi lançado em dobro.</div>` : ''}
+    ${d.excedente ? `<div class="alert" style="margin-top:16px">Os aportes somam ${brl(d.excedente)} a mais que o capital do carro (compra + custos). Isso acontece quando a compra ou um custo foi reduzido ou excluído depois do aporte. Diminua ou exclua o aporte que sobrou. Enquanto isso, a divisão usa o total aportado como base.</div>` : ''}
     <div class="card" style="margin-top:18px"><div class="card-h"><h2>Divisão por sócio</h2></div>
     ${table([
       { label: 'Sócio', html: (s) => `<div class="t1">${esc(s.nome)} ${s.loja ? pill('Empresa', 'dark') : ''}</div>${s.nao_atribuido ? `<div class="t2">inclui ${brl(s.nao_atribuido)} sem sócio definido</div>` : ''}` },
@@ -302,7 +302,8 @@ async function tabInvest(el, v, reload) {
         { label: 'A repassar', num: true, html: (s) => (s.loja ? '<span class="muted">fica na loja</span>' : s.a_repassar > 0.009 ? `<strong class="gold">${brl(s.a_repassar)}</strong>` : pill('Quitado', 'ok')) }] : []),
     ], d.socios, { empty: 'Sem capital neste veículo ainda (informe o valor de compra).' })}
     <p class="hint" style="margin:12px 0 0">Participação = aporte ÷ capital do carro. O lucro${vendido ? '' : ' (quando vender)'} é dividido nessa proporção, depois de descontar a comissão do vendedor. ${vendido && d.socios.some((s) => !s.loja && s.a_repassar > 0.009) ? 'Registre os repasses na ficha de cada sócio (Financeiro → Sócios e investimentos).' : ''}</p></div>
-    <div class="card" style="margin-top:18px"><div class="card-h"><h2>Aportes</h2><button class="btn sm" id="ap-add" ${socios.filter((s) => !s.loja && s.ativo).length ? '' : 'disabled'}>${icon('plus')}Registrar aporte</button></div>
+    <div class="card" style="margin-top:18px"><div class="card-h"><h2>Aportes</h2><button class="btn sm" id="ap-add" ${socios.filter((s) => !s.loja && s.ativo).length && d.capital - d.aportado > 0.009 ? '' : 'disabled'} ${d.capital - d.aportado > 0.009 ? '' : 'title="O capital do carro já está todo coberto por aportes"'}>${icon('plus')}Registrar aporte</button></div>
+    ${d.capital > 0 && d.capital - d.aportado <= 0.009 && !d.excedente ? '<p class="hint" style="margin:0 0 10px">O capital do carro (compra + custos) já está todo coberto por aportes. Para aportar mais, lance antes a compra ou o custo que o sócio pagou.</p>' : ''}
     ${socios.filter((s) => !s.loja).length ? '' : `<div class="alert info">Nenhum sócio cadastrado. ${can('financeiro') ? '<a class="linkbtn" href="#/socios">Cadastre os sócios</a> para registrar aportes.' : 'Peça ao financeiro para cadastrar os sócios.'}</div>`}
     ${table([
       { label: 'Data', html: (a) => dt(a.data) },
@@ -315,17 +316,20 @@ async function tabInvest(el, v, reload) {
     ], d.aportes, { empty: 'Nenhum aporte registrado. Todo o capital deste carro está contando como do caixa da loja.' })}
     <p class="hint" style="margin:12px 0 0">Custos pagos por um sócio entram aqui sozinhos: ao lançar o custo, escolha quem pagou em <strong>Pago por</strong>.</p></div>`;
 
+  // quanto ainda cabe de aporte neste carro (na edição, o próprio aporte volta para o disponível)
+  const livre = (a) => Math.max(0, Math.round((d.capital - d.aportado + (a ? a.valor : 0)) * 100) / 100);
   const form = (a) => modal({
     title: a ? 'Editar aporte' : 'Registrar aporte', size: 'wide',
     body: `<div class="form-grid">
       ${selectField('Sócio', 'socio_id', socios.filter((s) => !s.loja && (s.ativo || (a && a.socio_id === s.id))).map((s) => [s.id, s.nome]), a ? a.socio_id : '', { cls: 'c6', empty: 'Escolha…' })}
       ${selectField('Referente a', 'referente', { compra: 'Compra do veículo', outro: 'Outro (ex.: reforço de capital)' }, a ? a.referente : 'compra', { cls: 'c6' })}
-      ${moneyField('Valor', 'valor', a ? a.valor : d.nao_atribuido || null, { cls: 'c4', hint: a ? '' : d.nao_atribuido ? `Sugestão: ${brl(d.nao_atribuido)} ainda sem sócio.` : '' })}
+      ${moneyField('Valor', 'valor', a ? a.valor : d.nao_atribuido || null, { cls: 'c4', hint: `Disponível para aporte: ${brl(livre(a))} (capital ${brl(d.capital)}).` })}
       ${field('Data', 'data', a ? a.data : v.data_entrada || today(), { type: 'date', cls: 'c4' })}
       ${field('Descrição (opcional)', 'descricao', a && a.descricao, { cls: 'c4', attrs: 'placeholder="Ex.: metade da compra"' })}
       <label class="check c12"><input type="checkbox" name="lancar_caixa" ${!a || a.lancamento_id ? 'checked' : ''}> Lançar no caixa como entrada "Aporte de sócios"</label>
       <p class="hint c12">Deixe marcado quando o dinheiro passou pelo caixa da loja ou quando o sócio pagou direto ao vendedor (a compra já saiu do caixa, e esta entrada compensa). Desmarque só se a compra não foi lançada no caixa.</p></div>`,
     onSubmit: async (f) => {
+      if (Number(f.valor) > livre(a) + 0.009) throw new Error(`O aporte passa do capital do veículo. Ainda disponível: ${brl(livre(a))}.`);
       if (!f.socio_id) throw new Error('Escolha o sócio.');
       if (!(f.valor > 0)) throw new Error('Informe o valor.');
       if (a) await put('/aportes/' + a.id, f); else await post(`/veiculos/${v.id}/aportes`, f);
