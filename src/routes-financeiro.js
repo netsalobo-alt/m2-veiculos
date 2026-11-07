@@ -55,7 +55,32 @@ function relFinanceiro(de, ate) {
     despesas, outras: outrasRec,
   };
   const pendentes = db.prepare(`SELECT tipo, SUM(valor) total, COUNT(*) n FROM lancamentos WHERE status='pendente' GROUP BY tipo`).all();
-  return { entradas: ent, saidas: sai, total_entradas: sum(ent), total_saidas: sum(sai), saldo: sum(ent) - sum(sai), dre, pendentes, contas: saldoContas(ate) };
+  return { socios: relSocios(de, ate), entradas: ent, saidas: sai, total_entradas: sum(ent), total_saidas: sum(sai), saldo: sum(ent) - sum(sai), dre, pendentes, contas: saldoContas(ate) };
+}
+
+// movimentos de sócios no período (pela data do pagamento). Ficam fora do resultado: são capital, não receita nem despesa.
+const CATS_SOCIOS = { 'Aporte de sócios': 'aportes', 'Adiantamento de sócios': 'adiantamentos', 'Restituição a sócios': 'restituicoes', 'Repasse a sócios': 'repasses' };
+function relSocios(de, ate) {
+  const rows = db.prepare(`SELECT l.socio_id, s.nome, s.loja, l.categoria, SUM(l.valor) t, COUNT(*) n FROM lancamentos l LEFT JOIN socios s ON s.id=l.socio_id
+    WHERE l.status='pago' AND l.data_pagamento BETWEEN ? AND ? AND l.categoria IN (${Object.keys(CATS_SOCIOS).map(() => '?').join(',')})
+    GROUP BY l.socio_id, l.categoria`).all(de, ate, ...Object.keys(CATS_SOCIOS));
+  const pend = Object.fromEntries(db.prepare(`SELECT socio_id, SUM(valor) t FROM lancamentos WHERE status='pendente' AND categoria='Restituição a sócios' GROUP BY socio_id`).all().map((r) => [r.socio_id, r.t]));
+  const m = new Map();
+  const novo = (id, nome) => ({ socio_id: id, nome: nome || 'Sem sócio identificado', aportes: 0, adiantamentos: 0, restituicoes: 0, repasses: 0, lancamentos: 0, a_restituir: 0 });
+  rows.forEach((r) => {
+    const o = m.get(r.socio_id) || novo(r.socio_id, r.nome);
+    o[CATS_SOCIOS[r.categoria]] += r.t; o.lancamentos += r.n; m.set(r.socio_id, o);
+  });
+  Object.entries(pend).forEach(([id, t]) => {
+    const k = id === 'null' ? null : Number(id);
+    if (!m.has(k)) { const s = k ? db.prepare('SELECT nome FROM socios WHERE id=?').get(k) : null; m.set(k, novo(k, s && s.nome)); }
+    m.get(k).a_restituir = t;
+  });
+  const linhas = [...m.values()].map((o) => ({ ...o, liquido: o.aportes + o.adiantamentos - o.restituicoes - o.repasses }))
+    .sort((a, b) => (a.socio_id == null) - (b.socio_id == null) || b.aportes - a.aportes || a.nome.localeCompare(b.nome));
+  const total = linhas.reduce((a, o) => { ['aportes', 'adiantamentos', 'restituicoes', 'repasses', 'liquido', 'a_restituir'].forEach((k) => { a[k] += o[k]; }); return a; },
+    { aportes: 0, adiantamentos: 0, restituicoes: 0, repasses: 0, liquido: 0, a_restituir: 0 });
+  return { linhas, total };
 }
 
 function relEstoque() {
@@ -288,9 +313,10 @@ module.exports = function (api, can) {
     const [de, ate] = periodo(req);
     const r = relFinanceiro(de, ate);
     if (req.query.formato === 'csv') {
-      const lanc = db.prepare(`SELECT l.*, c.nome conta FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id WHERE l.status!='cancelado' AND l.vencimento BETWEEN ? AND ? ORDER BY l.vencimento`).all(de, ate);
-      return csv(res, `financeiro_${de}_${ate}`, ['Vencimento', 'Pagamento', 'Tipo', 'Categoria', 'Descrição', 'Conta', 'Status', 'Valor'],
-        lanc.map((l) => [dataBR(l.vencimento), dataBR(l.data_pagamento), l.tipo, l.categoria, l.descricao, l.conta, l.status, l.tipo === 'saida' ? -l.valor : l.valor]));
+      const lanc = db.prepare(`SELECT l.*, c.nome conta, COALESCE(s.nome, ps.nome) socio FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id
+        LEFT JOIN socios s ON s.id=l.socio_id LEFT JOIN socios ps ON ps.id=l.pago_socio_id WHERE l.status!='cancelado' AND l.vencimento BETWEEN ? AND ? ORDER BY l.vencimento`).all(de, ate);
+      return csv(res, `financeiro_${de}_${ate}`, ['Vencimento', 'Pagamento', 'Tipo', 'Categoria', 'Descrição', 'Sócio', 'Conta', 'Status', 'Valor'],
+        lanc.map((l) => [dataBR(l.vencimento), dataBR(l.data_pagamento), l.tipo, l.categoria, l.descricao, l.socio || '', l.conta, l.status, l.tipo === 'saida' ? -l.valor : l.valor]));
     }
     if (req.query.formato === 'pdf') {
       const d = r.dre;
@@ -307,6 +333,9 @@ module.exports = function (api, can) {
             ['(–) Despesas operacionais', brl(-d.despesas_operacionais), pct(d.despesas_operacionais, d.receita_vendas)],
             ...d.despesas.map((o) => [`      ${o.categoria}`, brl(-o.total), '']),
           ], total: ['(=) Resultado do período', brl(d.resultado), pct(d.resultado, d.receita_vendas)] },
+          { titulo: 'Aportes e movimentos por sócio (fora do resultado)', colunas: [{ label: 'Sócio', w: 2.4 }, { label: 'Aportes', w: 1.2, align: 'right' }, { label: 'Pagou (a restituir)', w: 1.3, align: 'right' }, { label: 'Restituído', w: 1.1, align: 'right' }, { label: 'Repassado', w: 1.1, align: 'right' }, { label: 'Líquido no período', w: 1.3, align: 'right' }, { label: 'A restituir hoje', w: 1.2, align: 'right' }],
+            linhas: r.socios.linhas.map((o) => [o.nome, brl(o.aportes), brl(o.adiantamentos), brl(o.restituicoes), brl(o.repasses), brl(o.liquido), brl(o.a_restituir)]),
+            total: ['Total', brl(r.socios.total.aportes), brl(r.socios.total.adiantamentos), brl(r.socios.total.restituicoes), brl(r.socios.total.repasses), brl(r.socios.total.liquido), brl(r.socios.total.a_restituir)] },
           { titulo: 'Entradas realizadas por categoria', colunas: [{ label: 'Categoria', w: 4 }, { label: 'Lançamentos', w: 1, align: 'right' }, { label: 'Total', w: 2, align: 'right' }], linhas: r.entradas.map((e) => [e.categoria || '–', e.n, brl(e.total)]), total: ['Total', '', brl(r.total_entradas)] },
           { titulo: 'Saídas realizadas por categoria', colunas: [{ label: 'Categoria', w: 4 }, { label: 'Lançamentos', w: 1, align: 'right' }, { label: 'Total', w: 2, align: 'right' }], linhas: r.saidas.map((e) => [e.categoria || '–', e.n, brl(e.total)]), total: ['Total', '', brl(r.total_saidas)] },
           { titulo: 'Saldo por conta', colunas: [{ label: 'Conta', w: 4 }, { label: 'Tipo', w: 1 }, { label: 'Saldo', w: 2, align: 'right' }], linhas: r.contas.map((c) => [c.nome, c.tipo, brl(c.saldo)]) },

@@ -63,10 +63,20 @@ function finHtml(r) {
       ${linha('(–) Despesas operacionais', -d.despesas_operacionais)}${d.despesas.map((o) => linha(o.categoria, -o.total, '', true)).join('')}
       ${linha('(=) Resultado do período', d.resultado, 'total')}</section>
     <div class="stack">
+
       <section class="card"><h2>Entradas por categoria (caixa)</h2>${table([{ label: 'Categoria', html: (e) => esc(e.categoria || '–') }, { label: 'Lanç.', num: true, key: 'n' }, { label: 'Total', num: true, html: (e) => brl(e.total) }], r.entradas, { empty: 'Sem entradas.' })}</section>
       <section class="card"><h2>Saídas por categoria (caixa)</h2>${table([{ label: 'Categoria', html: (e) => esc(e.categoria || '–') }, { label: 'Lanç.', num: true, key: 'n' }, { label: 'Total', num: true, html: (e) => brl(e.total) }], r.saidas, { empty: 'Sem saídas.' })}</section>
       <section class="card"><h2>Saldo por conta</h2>${r.contas.map((c) => linha(c.nome, c.saldo)).join('')}</section>
-    </div></div>`;
+    </div></div>
+      <section class="card" style="margin-top:18px"><h2>Aportes por sócio</h2><p class="muted" style="margin:-6px 0 10px;font-size:13px">Pagos no período. Ficam fora do resultado: são capital dos sócios, não receita nem despesa da loja.</p>
+      ${table([
+        { label: 'Sócio', html: (o) => (o.socio_id ? `<a class="linkbtn" href="#/socio/${o.socio_id}">${esc(o.nome)}</a>` : `<span class="muted">${esc(o.nome)}</span>`) },
+        { label: 'Aportes', num: true, html: (o) => `<strong>${brl(o.aportes)}</strong>` },
+        { label: 'Pagou (a restituir)', num: true, html: (o) => brl(o.adiantamentos) },
+        { label: 'Restituído', num: true, html: (o) => brl(o.restituicoes) },
+        { label: 'Repassado', num: true, html: (o) => brl(o.repasses) },
+        { label: 'A restituir hoje', num: true, html: (o) => (o.a_restituir > 0.009 ? `<strong class="gold">${brl(o.a_restituir)}</strong>` : brl(0)) },
+      ], r.socios.linhas, { empty: 'Nenhum aporte ou movimento de sócio no período.', foot: r.socios.linhas.length ? ['Total', brl(r.socios.total.aportes), brl(r.socios.total.adiantamentos), brl(r.socios.total.restituicoes), brl(r.socios.total.repasses), brl(r.socios.total.a_restituir)] : null })}</section>`;
 }
 
 function estHtml(r) {
