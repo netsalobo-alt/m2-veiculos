@@ -153,6 +153,55 @@ module.exports = function (api, can) {
     res.json({ ok: true });
   });
 
+  // duplicar: cria cópias do anúncio (ex.: a mesma bike em outras cores). Não copia placa, renavam, chassi,
+  // custos, aportes nem anúncio da OLX. Fotos são copiadas como arquivos novos (cada veículo tem as suas).
+  api.post('/veiculos/:id/duplicar', can('estoque'), (req, res) => {
+    const o = db.prepare('SELECT * FROM veiculos WHERE id=?').get(req.params.id);
+    if (!o) return res.status(404).json({ error: 'Veículo não encontrado.' });
+    const itens = Array.isArray(req.body && req.body.itens) ? req.body.itens : [];
+    if (!itens.length) throw bad('Informe ao menos uma cópia.');
+    if (itens.length > 30) throw bad('No máximo 30 cópias por vez.');
+    const base = {};
+    VEIC_FIELDS.concat(['fipe_tipo', 'fipe_marca', 'fipe_modelo', 'fipe_ano', 'fipe_codigo', 'fipe_valor', 'fipe_referencia', 'fipe_atualizado_em'])
+      .forEach((k) => { base[k] = o[k]; });
+    ['placa', 'renavam', 'chassi'].forEach((k) => { base[k] = null; });
+    base.data_entrada = today();
+    if (o.status === 'vendido') base.status = 'disponivel';
+    if (!req.user.perms.includes('custos')) { base.valor_compra = 0; base.preco_minimo = 0; base.fornecedor_id = null; }
+    const txt = (v, n) => (v == null ? '' : String(v).trim().slice(0, n));
+    const fotos = req.body.fotos === false || req.body.fotos === 0 ? [] : db.prepare('SELECT arquivo,ordem FROM veiculo_fotos WHERE veiculo_id=? ORDER BY ordem,id').all(o.id);
+    const novos = [];
+    const copiados = [];
+    try {
+      db.transaction(() => {
+        for (const it of itens) {
+          const d = { ...base };
+          if (txt(it.cor, 40)) d.cor = txt(it.cor, 40);
+          d.placa = txt(it.placa, 10).toUpperCase() || null;
+          d.chassi = txt(it.chassi, 40) || null;
+          if (it.preco_venda != null && it.preco_venda !== '' && Number(it.preco_venda) >= 0) d.preco_venda = Number(it.preco_venda);
+          const keys = Object.keys(d);
+          const r = db.prepare(`INSERT INTO veiculos(${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map((k) => d[k]));
+          const nid = Number(r.lastInsertRowid);
+          for (const f of fotos) {
+            const nome = `v${nid}-${crypto.randomBytes(6).toString('hex')}${path.extname(f.arquivo) || '.jpg'}`;
+            const de = path.join(DATA_DIR, 'uploads', f.arquivo);
+            if (!fs.existsSync(de)) continue;
+            fs.copyFileSync(de, path.join(DATA_DIR, 'uploads', nome));
+            copiados.push(nome);
+            db.prepare('INSERT INTO veiculo_fotos(veiculo_id,arquivo,ordem) VALUES (?,?,?)').run(nid, nome, f.ordem);
+          }
+          syncCompraLancamento(db.prepare('SELECT * FROM veiculos WHERE id=?').get(nid), req.user.id);
+          novos.push(nid);
+        }
+      })();
+    } catch (e) {
+      copiados.forEach((n) => fs.rm(path.join(DATA_DIR, 'uploads', n), () => {})); // desfaz as fotos copiadas
+      throw e;
+    }
+    res.json({ ok: true, ids: novos });
+  });
+
   // fotos
   api.post('/veiculos/:id/fotos', can('estoque'), upload.array('fotos', 20), (req, res) => {
     const max = db.prepare('SELECT COALESCE(MAX(ordem),0) m FROM veiculo_fotos WHERE veiculo_id=?').get(req.params.id).m;

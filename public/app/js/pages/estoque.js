@@ -1,4 +1,4 @@
-import { get, post, put, del, api, esc, brl, num, pct, dt, dth, today, can, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, bindRows, statusVeic, vdesc, CATEG, STATUS_V, FORMAS, fotoUrl, icon, pill, pessoaPicker, formData } from '../core.js';
+import { get, post, put, del, api, esc, brl, num, pct, dt, dth, today, can, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, bindRows, statusVeic, vdesc, CATEG, STATUS_V, FORMAS, fotoUrl, icon, pill, pessoaPicker, formData, parseMoney, moneyInput } from '../core.js';
 import { setCrumbs } from '../main.js';
 import { gerarDocumento } from './documentos.js';
 
@@ -32,7 +32,7 @@ export async function list(view) {
       <div class="kpi"><div class="k">Tempo médio no pátio</div><div class="v">${rows.length ? num(tot.dias / rows.length) : 0} dias</div></div>`;
     const cols = [
       { label: '', html: (v) => `<span class="thumb-s ${v.foto ? '' : 'noimg'}" style="${v.foto ? `background-image:url('${fotoUrl(v.foto)}')` : ''}"></span>` },
-      { label: 'Veículo', html: (v) => `<div class="t1">${esc(vdesc(v))}</div><div class="t2">${CATEG[v.categoria]} · ${v.ano_fab || '–'}/${v.ano_mod || '–'} · ${esc(v.placa || 'sem placa')}${v.km != null ? ' · ' + num(v.km) + ' km' : ''}</div>` },
+      { label: 'Veículo', html: (v) => `<div class="t1">${esc(vdesc(v))}</div><div class="t2">${CATEG[v.categoria]} · ${v.ano_fab || '–'}/${v.ano_mod || '–'}${v.cor ? ' · ' + esc(v.cor) : ''} · ${esc(v.placa || (v.chassi && v.categoria === 'bike' ? 'série ' + v.chassi : 'sem placa'))}${v.km != null ? ' · ' + num(v.km) + ' km' : ''}</div>` },
       { label: 'Situação', html: (v) => statusVeic(v.status) + (v.publicado ? ' <span class="pill info" title="Publicado no site">Site</span>' : '') },
       { label: 'Pátio', num: true, html: (v) => `<span class="pill ${v.status === 'vendido' ? '' : v.dias_patio > 90 ? 'bad' : v.dias_patio > 60 ? 'warn' : ''}">${v.dias_patio} d</span>` },
       ...(custo ? [{ label: 'Compra', num: true, html: (v) => brl(v.valor_compra) }, { label: 'Custos', num: true, html: (v) => brl(v.custos_total) }] : []),
@@ -214,9 +214,10 @@ export async function detail(view, { id, params }) {
   view.innerHTML = `<div class="ph"><div class="vhead">
       <div class="ph-img ${capa ? '' : 'noimg'}" style="${capa ? `background-image:url('${fotoUrl(capa.arquivo)}')` : ''}"></div>
       <div><p class="eyebrow">${esc(CATEG[v.categoria].toUpperCase())} · ${v.ano_fab || '–'}/${v.ano_mod || '–'}</p><h1>${esc(vdesc(v))}</h1>
-      <p>${statusVeic(v.status)} ${v.publicado ? pill('No site', 'info') : ''} · ${esc(v.placa || 'sem placa')} · ${v.dias_patio} dias no pátio${v.status === 'vendido' ? ' (até a venda)' : ''}</p></div></div>
+      <p>${statusVeic(v.status)} ${v.publicado ? pill('No site', 'info') : ''}${v.cor ? ' · ' + esc(v.cor) : ''} · ${esc(v.placa || 'sem placa')} · ${v.dias_patio} dias no pátio${v.status === 'vendido' ? ' (até a venda)' : ''}</p></div></div>
     <div class="acts">
       <button class="btn ghost" id="b-edit">Editar dados</button>
+      <button class="btn ghost" id="b-dup" title="Criar outro anúncio igual, mudando só cor, chassi ou placa">Duplicar</button>
       ${v.status !== 'vendido' && can('vendas') ? `<a class="btn" href="#/vendas/nova?veiculo=${v.id}">${icon('sale')}Vender</a>` : ''}
       ${v.venda ? `<a class="btn black" href="#/venda/${v.venda.id}">Ver venda</a>` : ''}
     </div></div>
@@ -227,9 +228,52 @@ export async function detail(view, { id, params }) {
     title: 'Editar veículo', size: 'xwide', body: veiculoForm(v), onOpen: (d) => wireForm(d, v),
     onSubmit: async (d) => { await put('/veiculos/' + v.id, clean(d)); await salvarFipePlaca(v.id, d); toast('Dados salvos.'); detail(view, { id, params: {} }); },
   });
+  view.querySelector('#b-dup').onclick = () => duplicar(v);
   const reload = () => detail(view, { id, params: {} });
   const tab = view.querySelector('#tab');
   ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: tabDocs, olx: tabOlx, investimento: tabInvest })[tabAtual](tab, v, reload);
+}
+
+// ------------------------------------------------------------------ duplicar anúncio (ex.: a mesma bike em várias cores)
+function duplicar(v) {
+  const bike = v.categoria === 'bike';
+  const linha = (cor = '') => `<div class="form-grid dup-row" style="align-items:end;margin-bottom:8px">
+      <label class="c4">Cor<input name="d_cor" value="${esc(cor)}" placeholder="${esc(v.cor || 'Ex.: Preta')}" maxlength="40"></label>
+      <label class="${bike ? 'c4' : 'c3'}">${bike ? 'Nº de série / chassi' : 'Chassi'}<input name="d_chassi" maxlength="40"></label>
+      ${bike ? '' : '<label class="c2">Placa<input name="d_placa" maxlength="8" style="text-transform:uppercase"></label>'}
+      <label class="${bike ? 'c3' : 'c2'}">Preço de venda<input name="d_preco" class="money" inputmode="decimal" value="${esc(moneyInput(v.preco_venda))}"></label>
+      <div class="c1"><button type="button" class="btn ghost sm dup-del" aria-label="Remover esta cópia" title="Remover">×</button></div>
+    </div>`;
+  modal({
+    title: 'Duplicar anúncio', size: 'xwide', submitLabel: 'Criar cópias',
+    body: `<p class="muted" style="margin-top:0">Cria anúncios novos iguais a <strong>${esc(vdesc(v))}</strong>${v.cor ? ` (${esc(v.cor)})` : ''}, com os mesmos dados, descrição, opcionais${can('custos') ? ', valor de compra' : ''} e preço. Cada linha abaixo vira um anúncio. Mude só o que for diferente.</p>
+      <div id="dup-rows">${linha()}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 14px">
+        <button type="button" class="btn ghost sm" id="dup-add">${icon('plus')}Adicionar outra cópia</button>
+        <label style="display:flex;align-items:center;gap:6px">ou adicionar <input type="number" id="dup-n" min="1" max="30" value="2" style="width:64px"> <button type="button" class="btn ghost sm" id="dup-addn">de uma vez</button></label>
+      </div>
+      ${v.fotos.length ? `<label class="check"><input type="checkbox" name="fotos" checked> Copiar as ${v.fotos.length} foto(s). Desmarque se a cor muda e você vai enviar fotos novas.</label>` : ''}
+      <p class="hint">Não são copiados: ${bike ? '' : 'placa, renavam, '}chassi, custos, aportes de sócios e anúncio da OLX. A data de entrada fica como hoje.${can('custos') && v.valor_compra > 0 ? ' Cada cópia gera seu próprio lançamento de compra no financeiro.' : ''}</p>`,
+    onOpen: (d) => {
+      const rows = d.querySelector('#dup-rows');
+      const add = (n = 1) => { for (let i = 0; i < n && rows.children.length < 30; i++) rows.insertAdjacentHTML('beforeend', linha()); };
+      d.querySelector('#dup-add').onclick = () => add(1);
+      d.querySelector('#dup-addn').onclick = () => add(Math.max(1, Math.min(30, Number(d.querySelector('#dup-n').value) || 1)));
+      rows.addEventListener('click', (e) => { const b = e.target.closest('.dup-del'); if (b && rows.children.length > 1) b.closest('.dup-row').remove(); });
+      rows.querySelector('input').focus();
+    },
+    onSubmit: async (f, form) => {
+      const itens = [...form.querySelectorAll('.dup-row')].map((r) => {
+        const val = (n) => { const el = r.querySelector(`[name=${n}]`); return el ? el.value.trim() : ''; };
+        const pr = val('d_preco');
+        return { cor: val('d_cor'), chassi: val('d_chassi'), placa: val('d_placa'), preco_venda: pr === '' ? null : parseMoney(pr) };
+      });
+      const r = await post(`/veiculos/${v.id}/duplicar`, { itens, fotos: v.fotos.length ? !!f.fotos : false });
+      toast(r.ids.length === 1 ? 'Cópia criada. Confira os dados.' : `${r.ids.length} cópias criadas.`);
+      if (r.ids.length === 1) location.hash = `#/veiculo/${r.ids[0]}`;
+      else { listState.categoria = v.categoria; listState.status = 'estoque'; location.hash = '#/estoque'; }
+    },
+  });
 }
 
 // ------------------------------------------------------------------ investimento (capital por sócio)
