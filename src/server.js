@@ -145,7 +145,7 @@ app.use('/api', api);
 // erros
 app.use('/api', (err, req, res, next) => {
   console.error(err);
-  res.status(err.status || 500).json({ error: err.publicMessage || err.message || 'Erro interno.' });
+  res.status(err.status || 500).json({ error: err.publicMessage || err.message || 'Erro interno.', ...(err.code && err.publicMessage ? { code: err.code, detalhes: err.detalhes } : {}) });
 });
 
 // ---------------- arquivos estáticos ----------------
