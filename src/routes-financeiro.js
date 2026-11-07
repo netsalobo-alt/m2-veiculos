@@ -156,6 +156,14 @@ module.exports = function (api, can) {
         .run(b.descricao ?? cur.descricao, b.categoria ?? cur.categoria, Number(b.valor ?? cur.valor), b.vencimento || cur.vencimento, status,
           status === 'pago' ? b.data_pagamento || cur.data_pagamento || today() : null, b.conta_id ?? cur.conta_id, b.forma ?? cur.forma, b.observacoes ?? cur.observacoes, cur.id);
       const atual = db.prepare('SELECT * FROM lancamentos WHERE id=?').get(cur.id);
+      // trocou a conta: as entradas de sócio que cobrem esta saída vão junto, para continuarem se anulando
+      if (atual.conta_id !== cur.conta_id && atual.conta_id) {
+        const up = (where, ...args) => db.prepare(`UPDATE lancamentos SET conta_id=? WHERE ${where}`).run(atual.conta_id, ...args);
+        up("origem_id=? AND categoria!='Restituição a sócios'", cur.id);
+        up('aporte_id IN (SELECT id FROM veiculo_aportes WHERE lancamento_id=?)', cur.id);
+        if (cur.custo_id) up('aporte_id IN (SELECT id FROM veiculo_aportes WHERE custo_id=?)', cur.custo_id);
+        if (cur.categoria === 'Compra de veículos' && cur.veiculo_id && !cur.venda_id) up("aporte_id IN (SELECT id FROM veiculo_aportes WHERE veiculo_id=? AND referente='compra' AND custo_id IS NULL AND lancamento_id IS NULL)", cur.veiculo_id);
+      }
       if (status === 'pago' && socioId && (!cur.pago_socio_id || refaz)) socios.pagarPorSocio(atual, socioId, b.pago_socio_modo, req.user.id);
       else if (status === 'pago' && cur.pago_socio_id && !refaz && atual.data_pagamento !== cur.data_pagamento) {
         // só mudou a data: acompanha nos lançamentos gerados

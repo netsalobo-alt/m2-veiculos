@@ -232,10 +232,41 @@ if (!db.prepare('SELECT 1 FROM modelos LIMIT 1').get()) {
   for (const t of DEFAULT_TEMPLATES) ins.run(t.nome, t.tipo, t.conteudo);
 }
 
+// conta padrão de todos os lançamentos automáticos e dos formulários: a primeira conta bancária ativa (ou a primeira ativa)
+function contaPadrao() {
+  const r = db.prepare("SELECT id FROM contas WHERE ativo=1 AND tipo='banco' ORDER BY id LIMIT 1").get() || db.prepare('SELECT id FROM contas WHERE ativo=1 ORDER BY id LIMIT 1').get();
+  return r ? r.id : null;
+}
+
 function getSettings() {
   const o = {};
   for (const r of db.prepare('SELECT key,value FROM settings').all()) o[r.key] = r.value;
   return o;
 }
 
-module.exports = { db, DATA_DIR, getSettings };
+// ajuste único (v1): entradas de aporte de sócio que caíram numa conta diferente da saída que cobrem
+// (antes, custos iam para a primeira conta e aportes para a conta bancária). Move cada uma para a conta da
+// sua saída; o saldo total não muda. Guarda uma cópia do banco antes, em backups/.
+(function ajusteContasAportes() {
+  if (db.prepare("SELECT 1 FROM settings WHERE key='ajuste_contas_aportes_v1'").get()) return;
+  const alvo = db.prepare(`SELECT l.id, l.conta_id atual, COALESCE(
+      (SELECT x.conta_id FROM lancamentos x WHERE a.custo_id IS NOT NULL AND x.custo_id=a.custo_id),
+      (SELECT x.conta_id FROM lancamentos x WHERE a.lancamento_id IS NOT NULL AND x.id=a.lancamento_id),
+      (SELECT x.conta_id FROM lancamentos x WHERE a.referente='compra' AND x.veiculo_id=a.veiculo_id AND x.categoria='Compra de veículos' AND x.venda_id IS NULL LIMIT 1)
+    ) nova
+    FROM lancamentos l JOIN veiculo_aportes a ON a.id=l.aporte_id`).all().filter((r) => r.nova && r.nova !== r.atual);
+  if (alvo.length) {
+    try {
+      const dir = require('path').join(DATA_DIR, 'backups');
+      require('fs').mkdirSync(dir, { recursive: true });
+      const arq = require('path').join(dir, `antes-ajuste-contas-${new Date().toISOString().slice(0, 10)}.db`);
+      if (!require('fs').existsSync(arq)) db.exec(`VACUUM INTO '${arq.replace(/'/g, "''")}'`);
+    } catch (e) { console.error('[M2] Não foi possível copiar o banco antes do ajuste de contas:', e.message); return; }
+    const up = db.prepare('UPDATE lancamentos SET conta_id=? WHERE id=?');
+    db.transaction(() => alvo.forEach((r) => up.run(r.nova, r.id)))();
+  }
+  db.prepare("INSERT INTO settings(key,value) VALUES ('ajuste_contas_aportes_v1',?)").run(`${new Date().toISOString()} · ${alvo.length} lançamento(s) movido(s)`);
+  if (alvo.length) console.log(`[M2] Ajuste de contas: ${alvo.length} entrada(s) de aporte movida(s) para a conta da saída correspondente.`);
+})();
+
+module.exports = { db, DATA_DIR, getSettings, contaPadrao };

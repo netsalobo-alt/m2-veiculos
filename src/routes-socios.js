@@ -13,7 +13,14 @@ const { relatorioPDF } = require('./pdf');
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const lojaId = () => db.prepare('SELECT id FROM socios WHERE loja=1').get().id;
-const contaPadrao = () => (db.prepare("SELECT id FROM contas WHERE ativo=1 AND tipo='banco' ORDER BY id LIMIT 1").get() || db.prepare('SELECT id FROM contas WHERE ativo=1 ORDER BY id LIMIT 1').get() || {}).id || null;
+const { contaPadrao } = require('./db');
+// conta onde entra o aporte: a mesma da saída que ele cobre (custo, compra ou a conta paga), para as duas se anularem
+function contaDoAporte(ap) {
+  const r = (ap.custo_id && db.prepare('SELECT conta_id FROM lancamentos WHERE custo_id=?').get(ap.custo_id))
+    || (ap.lancamento_id && db.prepare('SELECT conta_id FROM lancamentos WHERE id=?').get(ap.lancamento_id))
+    || (ap.referente === 'compra' && db.prepare("SELECT conta_id FROM lancamentos WHERE veiculo_id=? AND categoria='Compra de veículos' AND venda_id IS NULL").get(ap.veiculo_id));
+  return (r && r.conta_id) || contaPadrao();
+}
 const getSocio = (id) => db.prepare('SELECT * FROM socios WHERE id=?').get(id);
 
 // ---------- cálculo por veículo ----------
@@ -99,9 +106,9 @@ function lancarAporte(ap, userId) {
   const desc = `Aporte de ${s.nome} – ${descVeiculo(v)}${v.placa ? ' (' + v.placa + ')' : ''}${ap.descricao ? ' · ' + ap.descricao : ''}`;
   const ex = db.prepare('SELECT id FROM lancamentos WHERE aporte_id=?').get(ap.id);
   const dt = ap.data || today();
-  if (ex) db.prepare('UPDATE lancamentos SET descricao=?, valor=?, vencimento=?, data_pagamento=?, socio_id=? WHERE id=?').run(desc, ap.valor, dt, dt, ap.socio_id, ex.id);
+  if (ex) db.prepare('UPDATE lancamentos SET descricao=?, valor=?, vencimento=?, data_pagamento=?, socio_id=?, conta_id=? WHERE id=?').run(desc, ap.valor, dt, dt, ap.socio_id, contaDoAporte(ap), ex.id);
   else db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,conta_id,veiculo_id,socio_id,aporte_id,criado_por)
-    VALUES ('entrada',?,'Aporte de sócios',?,?,?,'pago',?,?,?,?,?)`).run(desc, ap.valor, dt, dt, contaPadrao(), ap.veiculo_id, ap.socio_id, ap.id, userId);
+    VALUES ('entrada',?,'Aporte de sócios',?,?,?,'pago',?,?,?,?,?)`).run(desc, ap.valor, dt, dt, contaDoAporte(ap), ap.veiculo_id, ap.socio_id, ap.id, userId);
 }
 function validarAporte(b) {
   const s = getSocio(b.socio_id);
@@ -332,3 +339,4 @@ module.exports.divisao = divisao;
 module.exports.syncAporteCusto = syncAporteCusto;
 module.exports.pagarPorSocio = pagarPorSocio;
 module.exports.desfazerPagoPorSocio = desfazerPagoPorSocio;
+module.exports.contaDoAporte = contaDoAporte;

@@ -71,7 +71,7 @@ module.exports = function (api, can) {
     const troca = pags.find((x) => x.forma === 'troca');
     if (troca && !(b.troca && b.troca.marca && b.troca.modelo)) throw bad('Informe marca e modelo do veículo recebido na troca.');
     const data = b.data_venda || today();
-    const conta = db.prepare("SELECT id FROM contas WHERE ativo=1 AND tipo='banco' ORDER BY id LIMIT 1").get() || db.prepare('SELECT id FROM contas WHERE ativo=1 ORDER BY id LIMIT 1').get();
+    const conta = { id: require('./db').contaPadrao() };
 
     const id = db.transaction(() => {
       let trocaId = null;
