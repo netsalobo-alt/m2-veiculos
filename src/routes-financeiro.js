@@ -5,8 +5,8 @@ const { enrich } = require('./routes-estoque');
 const { relatorioPDF } = require('./pdf');
 
 const CATS = {
-  entrada: ['Venda de veículos', 'Retorno de financiamento', 'Serviços / despachante', 'Aporte de sócios', 'Empréstimos', 'Outras receitas'],
-  saida: ['Compra de veículos', 'Custos de veículos', 'Comissões', 'Repasse a sócios', 'Aluguel', 'Salários e encargos', 'Pró-labore', 'Impostos e taxas', 'Marketing e anúncios', 'Água, luz e internet', 'Despachante / documentação', 'Tarifas bancárias', 'Manutenção da loja', 'Outras despesas'],
+  entrada: ['Venda de veículos', 'Retorno de financiamento', 'Serviços / despachante', 'Aporte de sócios', 'Adiantamento de sócios', 'Empréstimos', 'Outras receitas'],
+  saida: ['Compra de veículos', 'Custos de veículos', 'Comissões', 'Repasse a sócios', 'Restituição a sócios', 'Aluguel', 'Salários e encargos', 'Pró-labore', 'Impostos e taxas', 'Marketing e anúncios', 'Água, luz e internet', 'Despachante / documentação', 'Tarifas bancárias', 'Manutenção da loja', 'Outras despesas'],
 };
 const firstOfMonth = () => today().slice(0, 8) + '01';
 const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(1).replace('.', ',')}%` : '–');
@@ -43,9 +43,9 @@ function relFinanceiro(de, ate) {
   // DRE por competência (vendas do período)
   const vendas = relVendas(de, ate);
   const despesas = db.prepare(`SELECT categoria, SUM(valor) total FROM lancamentos WHERE tipo='saida' AND status!='cancelado' AND vencimento BETWEEN ? AND ?
-    AND categoria NOT IN ('Compra de veículos','Custos de veículos','Comissões') GROUP BY categoria ORDER BY total DESC`).all(de, ate);
+    AND categoria NOT IN ('Compra de veículos','Custos de veículos','Comissões','Repasse a sócios','Restituição a sócios') GROUP BY categoria ORDER BY total DESC`).all(de, ate);
   const outrasRec = db.prepare(`SELECT categoria, SUM(valor) total FROM lancamentos WHERE tipo='entrada' AND status!='cancelado' AND vencimento BETWEEN ? AND ?
-    AND categoria NOT IN ('Venda de veículos') GROUP BY categoria ORDER BY total DESC`).all(de, ate);
+    AND categoria NOT IN ('Venda de veículos','Aporte de sócios','Adiantamento de sócios') GROUP BY categoria ORDER BY total DESC`).all(de, ate);
   const despTotal = sum(despesas), outrasTotal = sum(outrasRec);
   const cmv = vendas.total.compra + vendas.total.custos;
   const dre = {
@@ -117,7 +117,7 @@ module.exports = function (api, can) {
     if (req.query.conta_id) { w.push('l.conta_id=?'); p.push(req.query.conta_id); }
     if (req.query.categoria) { w.push('l.categoria=?'); p.push(req.query.categoria); }
     if (req.query.q) { w.push('l.descricao LIKE ?'); p.push(`%${req.query.q}%`); }
-    res.json(db.prepare(`SELECT l.*, c.nome conta_nome, p.nome pessoa_nome FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id LEFT JOIN pessoas p ON p.id=l.pessoa_id
+    res.json(db.prepare(`SELECT l.*, c.nome conta_nome, p.nome pessoa_nome, ps.nome pago_socio_nome FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id LEFT JOIN pessoas p ON p.id=l.pessoa_id LEFT JOIN socios ps ON ps.id=l.pago_socio_id
       WHERE ${w.join(' AND ')} ORDER BY ${campo}, l.id LIMIT 2000`).all(...p));
   });
   api.post('/lancamentos', can('financeiro'), (req, res) => {
@@ -142,16 +142,35 @@ module.exports = function (api, can) {
     const cur = db.prepare('SELECT * FROM lancamentos WHERE id=?').get(req.params.id);
     if (!cur) return res.status(404).end();
     const status = b.status || cur.status;
-    db.prepare('UPDATE lancamentos SET descricao=?, categoria=?, valor=?, vencimento=?, status=?, data_pagamento=?, conta_id=?, forma=?, observacoes=? WHERE id=?')
-      .run(b.descricao ?? cur.descricao, b.categoria ?? cur.categoria, Number(b.valor ?? cur.valor), b.vencimento || cur.vencimento, status,
-        status === 'pago' ? b.data_pagamento || cur.data_pagamento || today() : null, b.conta_id ?? cur.conta_id, b.forma ?? cur.forma, b.observacoes ?? cur.observacoes, cur.id);
+    const socios = require('./routes-socios');
+    const socioId = Number(b.pago_socio_id) || null;
+    if (cur.origem_id && (b.valor != null && Number(b.valor) !== cur.valor)) throw bad('Este lançamento nasceu de uma conta paga por sócio. Altere a conta de origem.');
+    db.transaction(() => {
+      // mudou de pago para pendente, mudou o valor ou trocou quem pagou: desfaz o que foi gerado e refaz se for o caso
+      const refaz = cur.pago_socio_id && (status !== 'pago' || socioId !== cur.pago_socio_id || (b.pago_socio_modo && b.pago_socio_modo !== cur.pago_socio_modo) || (b.valor != null && Number(b.valor) !== cur.valor) || (b.pago_socio_id !== undefined && !socioId));
+      if (refaz) socios.desfazerPagoPorSocio(cur);
+      db.prepare('UPDATE lancamentos SET descricao=?, categoria=?, valor=?, vencimento=?, status=?, data_pagamento=?, conta_id=?, forma=?, observacoes=? WHERE id=?')
+        .run(b.descricao ?? cur.descricao, b.categoria ?? cur.categoria, Number(b.valor ?? cur.valor), b.vencimento || cur.vencimento, status,
+          status === 'pago' ? b.data_pagamento || cur.data_pagamento || today() : null, b.conta_id ?? cur.conta_id, b.forma ?? cur.forma, b.observacoes ?? cur.observacoes, cur.id);
+      const atual = db.prepare('SELECT * FROM lancamentos WHERE id=?').get(cur.id);
+      if (status === 'pago' && socioId && (!cur.pago_socio_id || refaz)) socios.pagarPorSocio(atual, socioId, b.pago_socio_modo, req.user.id);
+      else if (status === 'pago' && cur.pago_socio_id && !refaz && atual.data_pagamento !== cur.data_pagamento) {
+        // só mudou a data: acompanha nos lançamentos gerados
+        db.prepare(`UPDATE lancamentos SET vencimento=?, data_pagamento=CASE WHEN status='pago' THEN ? ELSE data_pagamento END
+          WHERE origem_id=? AND NOT (categoria='Restituição a sócios' AND status='pago')`).run(atual.data_pagamento, atual.data_pagamento, cur.id);
+      }
+    })();
     if (cur.venda_id) db.prepare('UPDATE venda_pagamentos SET pago=? WHERE venda_id=? AND valor=? AND vencimento=?').run(status === 'pago' ? 1 : 0, cur.venda_id, cur.valor, cur.vencimento);
     res.json({ ok: true });
   });
   api.delete('/lancamentos/:id', can('financeiro'), (req, res) => {
     const cur = db.prepare('SELECT * FROM lancamentos WHERE id=?').get(req.params.id);
     if (cur && (cur.custo_id || cur.venda_id || cur.categoria === 'Compra de veículos' && cur.veiculo_id)) throw bad('Este lançamento é gerado por um veículo, custo ou venda. Altere-o pela origem.');
-    db.prepare('DELETE FROM lancamentos WHERE id=?').run(req.params.id);
+    if (cur && cur.origem_id) throw bad('Este lançamento nasceu de uma conta paga por sócio. Estorne ou exclua a conta de origem.');
+    db.transaction(() => {
+      if (cur) require('./routes-socios').desfazerPagoPorSocio(cur);
+      db.prepare('DELETE FROM lancamentos WHERE id=?').run(req.params.id);
+    })();
     res.json({ ok: true });
   });
 

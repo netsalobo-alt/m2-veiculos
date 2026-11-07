@@ -83,6 +83,12 @@ function resumo() {
       }
     }
   }
+  // aportes na empresa sem carro e restituições pendentes (contas pagas pelo sócio)
+  db.prepare(`SELECT socio_id, SUM(valor) t FROM lancamentos WHERE categoria='Aporte de sócios' AND aporte_id IS NULL AND socio_id IS NOT NULL
+    AND status!='cancelado' GROUP BY socio_id`).all().forEach((r) => { const o = out.get(r.socio_id); if (o) o.aporte_geral = r2(r.t); });
+  db.prepare(`SELECT socio_id, SUM(valor) t FROM lancamentos WHERE categoria='Restituição a sócios' AND status='pendente' AND socio_id IS NOT NULL
+    GROUP BY socio_id`).all().forEach((r) => { const o = out.get(r.socio_id); if (o) o.a_restituir = r2(r.t); });
+  for (const o of out.values()) { o.aporte_geral = o.aporte_geral || 0; o.a_restituir = o.a_restituir || 0; }
   return [...out.values()];
 }
 
@@ -107,6 +113,9 @@ function validarAporte(b) {
 function syncAporteCusto(c, socioId, userId) {
   const ex = db.prepare('SELECT * FROM veiculo_aportes WHERE custo_id=?').get(c.id);
   const s = socioId ? getSocio(socioId) : null;
+  // se a conta do custo foi paga como aporte de um sócio, o "Pago por" do custo manda: acompanha a troca ou a remoção
+  db.prepare("UPDATE lancamentos SET pago_socio_id=?, pago_socio_modo=CASE WHEN ? IS NULL THEN NULL ELSE pago_socio_modo END WHERE custo_id=? AND pago_socio_modo='aporte'")
+    .run(s && !s.loja ? s.id : null, s && !s.loja ? s.id : null, c.id);
   if (!s || s.loja) { if (ex) db.prepare('DELETE FROM veiculo_aportes WHERE id=?').run(ex.id); return; }
   const desc = `${c.categoria || 'Custo'}${c.descricao ? ': ' + c.descricao : ''}`.slice(0, 200);
   let id = ex && ex.id;
@@ -114,6 +123,61 @@ function syncAporteCusto(c, socioId, userId) {
   else id = db.prepare("INSERT INTO veiculo_aportes(veiculo_id,socio_id,referente,custo_id,valor,data,descricao,criado_por) VALUES (?,?,'custo',?,?,?,?,?)")
     .run(c.veiculo_id, s.id, c.id, c.valor, c.data || today(), desc, userId).lastInsertRowid;
   lancarAporte(db.prepare('SELECT * FROM veiculo_aportes WHERE id=?').get(id), userId);
+}
+
+// ---------- conta paga com dinheiro de um sócio ----------
+// O pagamento continua saindo da conta escolhida e, no mesmo dia, entra o mesmo valor vindo do sócio, então o saldo
+// do banco não muda (o dinheiro não saiu da loja). Depois:
+// - modo "aporte": o valor vira capital do sócio. Se a conta é de um carro, vira aporte no carro (entra na participação);
+//   sem carro, fica como aporte na empresa.
+// - modo "restituir": a loja fica devendo ao sócio. Nasce uma conta a pagar "Restituição a sócios".
+function pagarPorSocio(l, socioId, modo, userId) {
+  const s = getSocio(socioId);
+  if (!s || s.loja || !s.ativo) throw bad('Escolha o sócio que pagou.');
+  if (!['aporte', 'restituir'].includes(modo)) throw bad('Escolha se o valor soma aos aportes ou fica a restituir.');
+  if (l.tipo !== 'saida') throw bad('Só contas a pagar podem ser pagas por um sócio.');
+  if (['Repasse a sócios', 'Restituição a sócios'].includes(l.categoria)) throw bad('Este lançamento já é um pagamento ao sócio.');
+  const dt = l.data_pagamento || today();
+  const v = l.veiculo_id ? db.prepare('SELECT * FROM veiculos WHERE id=?').get(l.veiculo_id) : null;
+  const ref = v ? ` – ${descVeiculo(v)}${v.placa ? ' (' + v.placa + ')' : ''}` : '';
+  db.prepare('UPDATE lancamentos SET pago_socio_id=?, pago_socio_modo=? WHERE id=?').run(s.id, modo, l.id);
+  // a entrada do sócio cai na mesma conta do pagamento, para o saldo dela não mudar
+  const mesmaConta = (aporteId) => db.prepare('UPDATE lancamentos SET conta_id=COALESCE(?,conta_id), vencimento=?, data_pagamento=? WHERE aporte_id=?').run(l.conta_id, dt, dt, aporteId);
+  if (modo === 'aporte') {
+    if (l.custo_id) {
+      const c = db.prepare('SELECT * FROM veiculo_custos WHERE id=?').get(l.custo_id);
+      syncAporteCusto(c, s.id, userId); // mesmo efeito do "Pago por" do custo
+      mesmaConta(db.prepare('SELECT id FROM veiculo_aportes WHERE custo_id=?').get(c.id).id);
+      return;
+    }
+    if (v) {
+      const id = db.prepare('INSERT INTO veiculo_aportes(veiculo_id,socio_id,referente,valor,data,descricao,criado_por,lancamento_id) VALUES (?,?,?,?,?,?,?,?)')
+        .run(v.id, s.id, l.categoria === 'Compra de veículos' ? 'compra' : 'outro', r2(l.valor), dt, `Pagou: ${l.descricao}`.slice(0, 200), userId, l.id).lastInsertRowid;
+      lancarAporte(db.prepare('SELECT * FROM veiculo_aportes WHERE id=?').get(id), userId);
+      mesmaConta(id);
+      return;
+    }
+    db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,conta_id,socio_id,origem_id,criado_por)
+      VALUES ('entrada',?,'Aporte de sócios',?,?,?,'pago',?,?,?,?)`).run(`Aporte de ${s.nome} – pagou: ${l.descricao}`.slice(0, 250), r2(l.valor), dt, dt, l.conta_id || contaPadrao(), s.id, l.id, userId);
+    return;
+  }
+  db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,conta_id,veiculo_id,socio_id,origem_id,criado_por)
+    VALUES ('entrada',?,'Adiantamento de sócios',?,?,?,'pago',?,?,?,?,?)`).run(`${s.nome} pagou: ${l.descricao}`.slice(0, 250), r2(l.valor), dt, dt, l.conta_id || contaPadrao(), l.veiculo_id || null, s.id, l.id, userId);
+  db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,status,conta_id,forma,veiculo_id,socio_id,origem_id,criado_por)
+    VALUES ('saida',?,'Restituição a sócios',?,?,'pendente',?,'pix',?,?,?,?)`).run(`Restituir ${s.nome}: ${l.descricao}`.slice(0, 250), r2(l.valor), dt, l.conta_id || contaPadrao(), l.veiculo_id || null, s.id, l.id, userId);
+}
+// estorno ou exclusão da conta: desfaz o que nasceu dela
+function desfazerPagoPorSocio(l) {
+  if (!l.pago_socio_id) return;
+  const restPaga = db.prepare("SELECT 1 FROM lancamentos WHERE origem_id=? AND categoria='Restituição a sócios' AND status='pago'").get(l.id);
+  if (restPaga) throw bad('A restituição ao sócio já foi paga. Estorne a restituição primeiro.');
+  if (l.pago_socio_modo === 'aporte' && l.custo_id) {
+    const ap = db.prepare('SELECT * FROM veiculo_aportes WHERE custo_id=?').get(l.custo_id);
+    if (ap && ap.socio_id === l.pago_socio_id) db.prepare('DELETE FROM veiculo_aportes WHERE id=?').run(ap.id);
+  }
+  db.prepare('DELETE FROM veiculo_aportes WHERE lancamento_id=?').run(l.id);
+  db.prepare('DELETE FROM lancamentos WHERE origem_id=?').run(l.id);
+  db.prepare('UPDATE lancamentos SET pago_socio_id=NULL, pago_socio_modo=NULL WHERE id=?').run(l.id);
 }
 
 // ---------- relatórios (CSV / PDF) ----------
@@ -266,3 +330,5 @@ module.exports = function (api, can) {
 };
 module.exports.divisao = divisao;
 module.exports.syncAporteCusto = syncAporteCusto;
+module.exports.pagarPorSocio = pagarPorSocio;
+module.exports.desfazerPagoPorSocio = desfazerPagoPorSocio;
