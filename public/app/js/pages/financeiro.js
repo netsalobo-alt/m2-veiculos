@@ -1,4 +1,4 @@
-import { get, post, put, del, esc, brl, dt, today, monthStart, monthEnd, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, pill, icon, FORMAS, MESES } from '../core.js';
+import { get, post, put, del, esc, brl, dt, today, monthStart, monthEnd, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, pill, icon, FORMAS, MESES, can } from '../core.js';
 import { setCrumbs } from '../main.js';
 
 let mesOff = 0;
@@ -92,6 +92,40 @@ function contasDlg(onSaved) {
   }).catch(fail);
 }
 
+// ------------------------------------------------------------------ baixa (pagar / receber), com opção de conta paga por um sócio
+const CATS_SOCIO = ['Repasse a sócios', 'Restituição a sócios'];
+async function baixa(l, onSaved) {
+  const pagar = l.tipo === 'saida' && !CATS_SOCIO.includes(l.categoria) && can('custos');
+  const [contas, socios] = await Promise.all([get('/contas'), pagar ? get('/socios?simples=1') : []]);
+  const ativos = socios.filter((s) => !s.loja && s.ativo);
+  const onde = l.custo_id || l.veiculo_id ? 'no carro deste lançamento (entra na participação do sócio no lucro)' : 'na empresa (este lançamento não é de um carro)';
+  modal({
+    title: l.tipo === 'entrada' ? 'Registrar recebimento' : 'Registrar pagamento', size: pagar && ativos.length ? 'wide' : '',
+    body: `<p><strong>${esc(l.descricao)}</strong><br>${brl(l.valor)} · vence ${dt(l.vencimento)}</p>
+      <div class="form-grid">
+      ${field('Data do pagamento', 'data_pagamento', today(), { type: 'date', cls: 'c4' })}${selectField('Conta', 'conta_id', contas.map((c) => [c.id, c.nome]), l.conta_id, { cls: 'c4' })}${moneyField('Valor pago', 'valor', l.valor, { cls: 'c4' })}
+      ${pagar && ativos.length ? `${selectField('Quem pagou', 'pago_socio_id', [['', 'A loja (sai do caixa)'], ...ativos.map((s) => [s.id, s.nome])], '', { cls: 'c12' })}
+        <fieldset class="c12" id="modo" hidden style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0 0 14px">
+          <legend style="padding:0 6px;font-weight:600">O que fazer com esse valor</legend>
+          <label class="check"><input type="radio" name="pago_socio_modo" value="aporte" checked> <span><strong>Somar aos aportes do sócio</strong>: vira capital dele ${onde}.</span></label>
+          <label class="check"><input type="radio" name="pago_socio_modo" value="restituir"> <span><strong>A restituir ao sócio</strong>: a loja devolve depois. Cria uma conta a pagar "Restituição a sócios" em nome dele.</span></label>
+        </fieldset>
+        <p class="hint c12" id="modo-h" hidden>O saldo da conta não muda: o sistema lança o pagamento e, no mesmo dia, a entrada do dinheiro do sócio.</p>` : ''}
+      </div>`,
+    onOpen: (d) => {
+      const sel = d.querySelector('[name=pago_socio_id]');
+      if (sel) sel.onchange = () => { d.querySelector('#modo').hidden = !sel.value; d.querySelector('#modo-h').hidden = !sel.value; };
+    },
+    submitLabel: 'Confirmar',
+    onSubmit: async (d) => {
+      if (!d.pago_socio_id) { delete d.pago_socio_modo; d.pago_socio_id = null; }
+      await put('/lancamentos/' + l.id, { ...d, status: 'pago' });
+      toast(d.pago_socio_id ? (d.pago_socio_modo === 'aporte' ? 'Pagamento registrado e somado aos aportes do sócio.' : 'Pagamento registrado. A restituição ao sócio foi para Contas a pagar.') : 'Baixa registrada.');
+      onSaved && onSaved();
+    },
+  });
+}
+
 // ------------------------------------------------------------------ contas a pagar / receber
 const lf = { aba: 'receber', de: '', ate: '', q: '' };
 export async function lancamentos(view, { params }) {
@@ -117,21 +151,17 @@ export async function lancamentos(view, { params }) {
     const hoje = today();
     view.querySelector('#lst').innerHTML = table([
       { label: 'Vencimento', html: (l) => `${dt(l.vencimento)}${l.status === 'pendente' && l.vencimento < hoje ? '<div class="t2 neg">vencido</div>' : ''}` },
-      { label: 'Descrição', html: (l) => `<div class="t1">${esc(l.descricao)}</div><div class="t2">${esc(l.categoria || '')}${l.pessoa_nome ? ' · ' + esc(l.pessoa_nome) : ''}</div>` },
+      { label: 'Descrição', html: (l) => `<div class="t1">${esc(l.descricao)}</div><div class="t2">${esc(l.categoria || '')}${l.pessoa_nome ? ' · ' + esc(l.pessoa_nome) : ''}${l.pago_socio_nome ? ` · <strong>pago por ${esc(l.pago_socio_nome)}</strong> (${l.pago_socio_modo === 'aporte' ? 'somado aos aportes' : 'a restituir'})` : ''}</div>` },
       { label: 'Conta', key: 'conta_nome' },
       { label: 'Situação', html: (l) => (l.status === 'pago' ? pill(`${l.tipo === 'entrada' ? 'Recebido' : 'Pago'} ${dt(l.data_pagamento)}`, 'ok') : l.vencimento < hoje ? pill('Vencido', 'bad') : pill(l.tipo === 'entrada' ? 'A receber' : 'A pagar', 'warn')) },
       { label: 'Valor', num: true, html: (l) => `<strong class="${l.tipo === 'entrada' ? 'pos' : 'neg'}">${l.tipo === 'saida' ? '– ' : ''}${brl(l.valor)}</strong>` },
-      { label: '', cls: 'nowrap right', html: (l) => `${l.status === 'pendente' ? `<button class="btn sm" data-baixa>${l.tipo === 'entrada' ? 'Receber' : 'Pagar'}</button> ` : `<button class="btn sm ghost" data-estorno>Estornar</button> `}<button class="btn sm ghost" data-ed>Editar</button>${l.custo_id || l.venda_id || (l.categoria === 'Compra de veículos' && l.veiculo_id) ? '' : ' <button class="btn sm danger" data-rm aria-label="Excluir">×</button>'}` },
+      { label: '', cls: 'nowrap right', html: (l) => `${l.status === 'pendente' ? `<button class="btn sm" data-baixa>${l.tipo === 'entrada' ? 'Receber' : 'Pagar'}</button> ` : `<button class="btn sm ghost" data-estorno>Estornar</button> `}<button class="btn sm ghost" data-ed>Editar</button>${l.custo_id || l.venda_id || l.origem_id || (l.categoria === 'Compra de veículos' && l.veiculo_id) ? '' : ' <button class="btn sm danger" data-rm aria-label="Excluir">×</button>'}` },
     ], rows, { empty: 'Nenhum lançamento nesta lista.' });
     view.querySelectorAll('#lst tbody tr').forEach((tr, i) => {
       const l = rows[i];
       const on = (s, fn) => { const b = tr.querySelector(s); if (b) b.onclick = fn; };
-      on('[data-baixa]', () => get('/contas').then((contas) => modal({
-        title: l.tipo === 'entrada' ? 'Registrar recebimento' : 'Registrar pagamento',
-        body: `<p><strong>${esc(l.descricao)}</strong><br>${brl(l.valor)} · vence ${dt(l.vencimento)}</p>${field('Data do pagamento', 'data_pagamento', today(), { type: 'date' })}${selectField('Conta', 'conta_id', contas.map((c) => [c.id, c.nome]), l.conta_id)}${moneyField('Valor pago', 'valor', l.valor)}`,
-        submitLabel: 'Confirmar', onSubmit: async (d) => { await put('/lancamentos/' + l.id, { ...d, status: 'pago' }); toast('Baixa registrada.'); load(); },
-      })));
-      on('[data-estorno]', async () => { if (await confirmDlg('Voltar este lançamento para pendente?', 'Estornar')) { await put('/lancamentos/' + l.id, { status: 'pendente' }); load(); } });
+      on('[data-baixa]', () => baixa(l, load).catch(fail));
+      on('[data-estorno]', async () => { if (await confirmDlg(l.pago_socio_id ? `Voltar este lançamento para pendente? O que foi gerado pelo pagamento de ${l.pago_socio_nome} (${l.pago_socio_modo === 'aporte' ? 'aporte' : 'restituição'}) também é desfeito.` : 'Voltar este lançamento para pendente?', 'Estornar')) { try { await put('/lancamentos/' + l.id, { status: 'pendente' }); load(); } catch (e) { fail(e); } } });
       on('[data-ed]', () => lancForm(l, load));
       on('[data-rm]', async () => { if (await confirmDlg('Excluir este lançamento?', 'Excluir')) { try { await del('/lancamentos/' + l.id); load(); } catch (e) { fail(e); } } });
     });

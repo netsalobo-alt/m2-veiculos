@@ -44,6 +44,7 @@ export async function list(view) {
       { label: 'Vendidos', num: true, key: 'carros_vendidos' },
       { label: 'Lucro realizado', num: true, html: (s) => `<span class="${neg(s.lucro_realizado)}">${brl(s.lucro_realizado)}</span>` },
       { label: 'A repassar', num: true, html: (s) => (s.loja ? '<span class="muted">–</span>' : s.a_repassar > 0.009 ? `<strong class="gold">${brl(s.a_repassar)}</strong>` : brl(s.a_repassar)) },
+      { label: 'A restituir', num: true, html: (s) => (s.loja ? '<span class="muted">–</span>' : s.a_restituir > 0.009 ? `<strong class="gold">${brl(s.a_restituir)}</strong>` : brl(s.a_restituir)) },
     ], rows, { onRow: true, empty: 'Nenhum sócio cadastrado.' })}</div>
     ${socios.length ? '' : '<div class="alert info" style="margin-top:16px">Cadastre os sócios em <strong>Novo sócio</strong>. Depois, na página de cada veículo, aba <strong>Investimento</strong>, informe quanto cada um aportou. O que ninguém cobrir conta como capital do caixa da loja.</div>'}`;
   bindRows(view, rows, (s) => (location.hash = '#/socio/' + s.id));
@@ -65,6 +66,9 @@ export async function detail(view, { id }) {
       <div class="kpi"><div class="k">Lucro previsto</div><div class="v ${neg(s.lucro_previsto)}">${brl(s.lucro_previsto)}</div><div class="s">se vender pelo preço anunciado</div></div>
       <div class="kpi"><div class="k">Lucro realizado</div><div class="v ${neg(s.lucro_realizado)}">${brl(s.lucro_realizado)}</div><div class="s">${s.carros_vendidos} carro(s) vendido(s)</div></div>
       <div class="kpi"><div class="k">A repassar</div><div class="v">${s.loja ? '–' : brl(s.a_repassar)}</div><div class="s">${s.loja ? 'fica no caixa da loja' : 'capital + lucro ainda não pago'}</div></div></div>
+    ${!s.loja && (s.a_restituir > 0.009 || s.aporte_geral > 0.009) ? `<div class="grid g4" style="margin-top:16px">
+      ${s.a_restituir > 0.009 ? `<div class="kpi"><div class="k">A restituir</div><div class="v gold">${brl(s.a_restituir)}</div><div class="s">contas que ${esc(s.nome)} pagou e a loja vai devolver${fin ? ` · <a class="linkbtn" href="#/lancamentos">ver em Contas a pagar</a>` : ''}</div></div>` : ''}
+      ${s.aporte_geral > 0.009 ? `<div class="kpi"><div class="k">Aportes na empresa</div><div class="v">${brl(s.aporte_geral)}</div><div class="s">contas da loja (sem carro) pagas pelo sócio</div></div>` : ''}</div>` : ''}
     <div class="card" style="margin-top:18px"><h2>Carros no pátio</h2>
     ${table([
       { label: 'Veículo', html: (l) => `<div class="t1">${esc(l.veiculo)}</div><div class="t2">${esc(l.placa || 'sem placa')} · ${l.dias} dias no pátio</div>` },
@@ -91,7 +95,7 @@ export async function detail(view, { id }) {
       { label: 'Data', html: (m) => dt(m.data_pagamento || m.vencimento) }, { label: 'Descrição', key: 'descricao' }, { label: 'Categoria', key: 'categoria' },
       { label: 'Situação', html: (m) => (m.status === 'pago' ? pill('Pago', 'ok') : pill('Pendente', 'warn')) },
       { label: 'Valor', num: true, html: (m) => `<span class="${m.tipo === 'entrada' ? 'pos' : 'neg'}">${m.tipo === 'entrada' ? '+' : '−'} ${brl(m.valor)}</span>` },
-    ], s.movimentos, { empty: 'Nenhum aporte ou repasse lançado no caixa.' })}</div>`;
+    ], s.movimentos, { empty: 'Nenhum aporte, repasse ou restituição lançado no caixa.' })}</div>`;
   view.querySelectorAll('.card').forEach((c, i) => { const lista = [s.estoque, s.vendidos][i]; if (lista) bindRows(c, lista, (l) => (location.hash = `#/veiculo/${l.veiculo_id}?tab=investimento`)); });
   view.querySelector('#pdf').onclick = () => window.open(`/api/socios/${s.id}/relatorio?formato=pdf`, '_blank');
   const ed = view.querySelector('#ed'); if (ed) ed.onclick = () => socioForm(s, () => detail(view, { id }));

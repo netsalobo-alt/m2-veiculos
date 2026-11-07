@@ -191,3 +191,7 @@ textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;f
 @media(max-width:1100px){.g-main{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:860px){.g2,.g3{grid-template-columns:minmax(0,1fr)}.ph>div{min-width:0}.ph h1{overflow-wrap:anywhere}}
 .card,.stack>*{min-width:0}
+
+/* duplicar anúncio: coluna estreita para o botão de remover a linha */
+.form-grid .c1{grid-column:span 1}
+.dup-row .dup-del{width:100%;margin-bottom:14px}

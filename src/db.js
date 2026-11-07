@@ -185,6 +185,12 @@ CREATE INDEX IF NOT EXISTS ix_aportes_socio ON veiculo_aportes(socio_id);
 const colsLanc = db.prepare('PRAGMA table_info(lancamentos)').all().map((c) => c.name);
 if (!colsLanc.includes('socio_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN socio_id INTEGER REFERENCES socios(id)');
 if (!colsLanc.includes('aporte_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN aporte_id INTEGER REFERENCES veiculo_aportes(id) ON DELETE CASCADE');
+// conta paga com dinheiro de um sócio: quem pagou, como trata (aporte | restituir) e o vínculo dos lançamentos gerados
+if (!colsLanc.includes('pago_socio_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN pago_socio_id INTEGER REFERENCES socios(id)');
+if (!colsLanc.includes('pago_socio_modo')) db.exec('ALTER TABLE lancamentos ADD COLUMN pago_socio_modo TEXT');
+if (!colsLanc.includes('origem_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN origem_id INTEGER REFERENCES lancamentos(id) ON DELETE CASCADE');
+const colsAp = db.prepare('PRAGMA table_info(veiculo_aportes)').all().map((c) => c.name);
+if (!colsAp.includes('lancamento_id')) db.exec('ALTER TABLE veiculo_aportes ADD COLUMN lancamento_id INTEGER REFERENCES lancamentos(id) ON DELETE CASCADE');
 if (!db.prepare('SELECT 1 FROM socios WHERE loja=1').get()) db.prepare("INSERT INTO socios(nome,loja) VALUES ('Caixa da loja',1)").run();
 
 // ---------- seed básico ----------
