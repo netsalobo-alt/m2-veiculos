@@ -126,13 +126,16 @@ module.exports = function (api, can) {
     if (!b.descricao || !(Number(b.valor) > 0)) throw bad('Informe descrição e valor.');
     const parcelas = Math.max(1, Math.min(60, Number(b.parcelas) || 1));
     const ins = db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,conta_id,forma,pessoa_id,veiculo_id,observacoes,criado_por) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const socioId = b.tipo === 'saida' && b.status === 'pago' ? Number(b.pago_socio_id) || null : null;
     db.transaction(() => {
       for (let i = 0; i < parcelas; i++) {
         const d = new Date((b.vencimento || today()) + 'T12:00:00');
         d.setMonth(d.getMonth() + i);
         const venc = d.toISOString().slice(0, 10);
         const pago = i === 0 && b.status === 'pago';
-        ins.run(b.tipo, parcelas > 1 ? `${b.descricao} (${i + 1}/${parcelas})` : b.descricao, b.categoria || null, Number(b.valor), venc, pago ? b.data_pagamento || venc : null, pago ? 'pago' : 'pendente', b.conta_id || null, b.forma || null, b.pessoa_id || null, b.veiculo_id || null, b.observacoes || null, req.user.id);
+        const r = ins.run(b.tipo, parcelas > 1 ? `${b.descricao} (${i + 1}/${parcelas})` : b.descricao, b.categoria || null, Number(b.valor), venc, pago ? b.data_pagamento || venc : null, pago ? 'pago' : 'pendente', b.conta_id || null, b.forma || null, b.pessoa_id || null, b.veiculo_id || null, b.observacoes || null, req.user.id);
+        // só a parcela já paga pode ter sido paga por um sócio
+        if (pago && socioId) require('./routes-socios').pagarPorSocio(db.prepare('SELECT * FROM lancamentos WHERE id=?').get(r.lastInsertRowid), socioId, b.pago_socio_modo, req.user.id);
       }
     })();
     res.json({ ok: true });
