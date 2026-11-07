@@ -46,9 +46,11 @@ export async function fluxo(view) {
 
 // ------------------------------------------------------------------ lançamento
 export async function lancForm(l, onSaved) {
-  const [cats, contas] = await Promise.all([get('/financeiro/categorias'), get('/contas')]);
-  const novo = !l.id;
   const tipo = l.tipo || 'saida';
+  const comSocio = podeSocio({ ...l, tipo });
+  const [cats, contas, socios] = await Promise.all([get('/financeiro/categorias'), get('/contas'), comSocio ? get('/socios?simples=1') : []]);
+  const ativos = socios.filter((s) => !s.loja && (s.ativo || s.id === l.pago_socio_id));
+  const novo = !l.id;
   const auto = l.custo_id || l.venda_id || (l.categoria === 'Compra de veículos' && l.veiculo_id);
   modal({
     title: novo ? (tipo === 'entrada' ? 'Nova entrada' : 'Nova saída') : 'Editar lançamento', size: 'wide',
@@ -62,10 +64,20 @@ export async function lancForm(l, onSaved) {
       ${selectField('Forma', 'forma', { '': '—', ...FORMAS }, l.forma, { cls: 'c4' })}
       ${selectField('Situação', 'status', { pendente: tipo === 'entrada' ? 'A receber' : 'A pagar', pago: tipo === 'entrada' ? 'Recebido' : 'Pago' }, l.status || 'pendente', { cls: 'c4' })}
       ${field('Data do pagamento', 'data_pagamento', l.data_pagamento || today(), { type: 'date', cls: 'c4' })}
+      ${comSocio ? socioBloco(ativos, l) : ''}
       ${novo ? field('Repetir mensalmente (parcelas)', 'parcelas', 1, { type: 'number', cls: 'c4', attrs: 'min="1" max="60"', hint: 'Ex.: aluguel 12x, empréstimo 24x.' }) : ''}
       ${areaField('Observações', 'observacoes', l.observacoes, { rows: 2 })}</div>`,
+    onOpen: (d) => {
+      wireSocio(d);
+      // "Quem pagou" só faz sentido para conta já paga; a categoria de sócio não leva o campo
+      const st = d.querySelector('[name=status]'), box = d.querySelector('#socio-box'), cat = d.querySelector('[name=categoria]');
+      const sync = () => { if (box) box.hidden = st.value !== 'pago' || CATS_SOCIO.includes(cat.value.trim()); };
+      st.addEventListener('change', sync); cat.addEventListener('input', sync); sync();
+    },
     onSubmit: async (d) => {
       d.tipo = tipo;
+      if (CATS_SOCIO.includes(String(d.categoria || '').trim())) { if (d.pago_socio_id !== undefined) d.pago_socio_id = null; }
+      limpaSocio(d);
       if (novo) await post('/lancamentos', d); else await put('/lancamentos/' + l.id, d);
       toast('Lançamento salvo.'); onSaved && onSaved();
     },
@@ -92,34 +104,45 @@ function contasDlg(onSaved) {
   }).catch(fail);
 }
 
-// ------------------------------------------------------------------ baixa (pagar / receber), com opção de conta paga por um sócio
+// campo "Quem pagou" (loja ou um sócio) e o que fazer com o valor: somar aos aportes ou restituir
 const CATS_SOCIO = ['Repasse a sócios', 'Restituição a sócios'];
+const podeSocio = (l) => (l.tipo || 'saida') === 'saida' && !CATS_SOCIO.includes(l.categoria) && !l.origem_id && can('custos');
+function socioBloco(ativos, l = {}) {
+  if (!ativos.length) return '';
+  const onde = l.custo_id || l.veiculo_id ? 'no carro deste lançamento (entra na participação do sócio no lucro)' : 'na empresa';
+  const modo = l.pago_socio_modo || 'aporte';
+  return `<div class="c12" id="socio-box">
+    ${selectField('Quem pagou', 'pago_socio_id', [['', 'A loja (sai do caixa)'], ...ativos.map((s) => [s.id, s.nome])], l.pago_socio_id || '')}
+    <fieldset id="modo" ${l.pago_socio_id ? '' : 'hidden'} style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0 0 14px">
+      <legend style="padding:0 6px;font-weight:600">O sócio pagou ou aportou. O que fazer com esse valor?</legend>
+      <label class="check"><input type="radio" name="pago_socio_modo" value="aporte" ${modo === 'aporte' ? 'checked' : ''}> <span><strong>Somar aos aportes do sócio</strong>: vira capital dele ${onde}.</span></label>
+      <label class="check"><input type="radio" name="pago_socio_modo" value="restituir" ${modo === 'restituir' ? 'checked' : ''}> <span><strong>A restituir ao sócio</strong>: a loja devolve depois. Cria uma conta a pagar "Restituição a sócios" em nome dele.</span></label>
+      <p class="hint" style="margin:6px 0 0">O saldo da conta não muda: o sistema lança o pagamento e, no mesmo dia, a entrada do dinheiro do sócio.</p>
+    </fieldset></div>`;
+}
+function wireSocio(d) {
+  const sel = d.querySelector('[name=pago_socio_id]');
+  if (sel) sel.addEventListener('change', () => { d.querySelector('#modo').hidden = !sel.value; });
+}
+const limpaSocio = (d) => { if (!d.pago_socio_id || d.status !== 'pago') { d.pago_socio_id = d.pago_socio_id === undefined ? undefined : null; delete d.pago_socio_modo; } return d; };
+
+// ------------------------------------------------------------------ baixa (pagar / receber), com opção de conta paga por um sócio
 async function baixa(l, onSaved) {
-  const pagar = l.tipo === 'saida' && !CATS_SOCIO.includes(l.categoria) && can('custos');
+  const pagar = l.tipo === 'saida' && podeSocio(l);
   const [contas, socios] = await Promise.all([get('/contas'), pagar ? get('/socios?simples=1') : []]);
   const ativos = socios.filter((s) => !s.loja && s.ativo);
-  const onde = l.custo_id || l.veiculo_id ? 'no carro deste lançamento (entra na participação do sócio no lucro)' : 'na empresa (este lançamento não é de um carro)';
   modal({
-    title: l.tipo === 'entrada' ? 'Registrar recebimento' : 'Registrar pagamento', size: pagar && ativos.length ? 'wide' : '',
+    title: l.tipo === 'entrada' ? 'Registrar recebimento' : 'Registrar pagamento', size: 'wide',
     body: `<p><strong>${esc(l.descricao)}</strong><br>${brl(l.valor)} · vence ${dt(l.vencimento)}</p>
       <div class="form-grid">
       ${field('Data do pagamento', 'data_pagamento', today(), { type: 'date', cls: 'c4' })}${selectField('Conta', 'conta_id', contas.map((c) => [c.id, c.nome]), l.conta_id, { cls: 'c4' })}${moneyField('Valor pago', 'valor', l.valor, { cls: 'c4' })}
-      ${pagar && ativos.length ? `${selectField('Quem pagou', 'pago_socio_id', [['', 'A loja (sai do caixa)'], ...ativos.map((s) => [s.id, s.nome])], '', { cls: 'c12' })}
-        <fieldset class="c12" id="modo" hidden style="border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0 0 14px">
-          <legend style="padding:0 6px;font-weight:600">O que fazer com esse valor</legend>
-          <label class="check"><input type="radio" name="pago_socio_modo" value="aporte" checked> <span><strong>Somar aos aportes do sócio</strong>: vira capital dele ${onde}.</span></label>
-          <label class="check"><input type="radio" name="pago_socio_modo" value="restituir"> <span><strong>A restituir ao sócio</strong>: a loja devolve depois. Cria uma conta a pagar "Restituição a sócios" em nome dele.</span></label>
-        </fieldset>
-        <p class="hint c12" id="modo-h" hidden>O saldo da conta não muda: o sistema lança o pagamento e, no mesmo dia, a entrada do dinheiro do sócio.</p>` : ''}
+      ${pagar ? socioBloco(ativos, l) : ''}
       </div>`,
-    onOpen: (d) => {
-      const sel = d.querySelector('[name=pago_socio_id]');
-      if (sel) sel.onchange = () => { d.querySelector('#modo').hidden = !sel.value; d.querySelector('#modo-h').hidden = !sel.value; };
-    },
+    onOpen: (d) => wireSocio(d),
     submitLabel: 'Confirmar',
     onSubmit: async (d) => {
-      if (!d.pago_socio_id) { delete d.pago_socio_modo; d.pago_socio_id = null; }
-      await put('/lancamentos/' + l.id, { ...d, status: 'pago' });
+      limpaSocio(Object.assign(d, { status: 'pago' }));
+      await put('/lancamentos/' + l.id, d);
       toast(d.pago_socio_id ? (d.pago_socio_modo === 'aporte' ? 'Pagamento registrado e somado aos aportes do sócio.' : 'Pagamento registrado. A restituição ao sócio foi para Contas a pagar.') : 'Baixa registrada.');
       onSaved && onSaved();
     },
