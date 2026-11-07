@@ -9,7 +9,7 @@ export async function api(path, opts = {}) {
   if (r.status === 401) { location.href = '/login?volta=' + encodeURIComponent(location.hash); throw new Error('Sessão expirada'); }
   const ct = r.headers.get('content-type') || '';
   const data = ct.includes('json') ? await r.json() : await r.text();
-  if (!r.ok) throw new Error((data && data.error) || 'Erro ao comunicar com o servidor.');
+  if (!r.ok) { const e = new Error((data && data.error) || 'Erro ao comunicar com o servidor.'); if (data && data.code) { e.code = data.code; e.detalhes = data.detalhes; } throw e; }
   return data;
 }
 export const get = (p) => api(p);
@@ -75,7 +75,27 @@ export function toast(msg, err = false) {
   box.append(t);
   setTimeout(() => t.remove(), err ? 6000 : 3500);
 }
-export const fail = (e) => toast(e.message || String(e), true);
+export const fail = (e) => (e && e.code === 'limite_aporte' ? erroAporte(e.detalhes) : toast(e.message || String(e), true));
+// pop-up de erro (bloqueante, com botão Entendi)
+export function erroDlg(titulo, html) {
+  const d = document.createElement('dialog');
+  d.className = 'erro-dlg';
+  d.setAttribute('role', 'alertdialog');
+  d.innerHTML = `<div class="dialog-top"><h2><span class="erro-ico" aria-hidden="true">!</span>${esc(titulo)}</h2><button class="close" type="button" aria-label="Fechar">×</button></div>
+    <div class="erro-body">${html}</div><div class="form-actions"><button class="btn" type="button" data-ok>Entendi</button></div>`;
+  document.body.append(d);
+  const close = () => { d.close(); d.remove(); };
+  d.querySelector('.close').onclick = close; d.querySelector('[data-ok]').onclick = close;
+  d.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+  d.showModal(); d.querySelector('[data-ok]').focus();
+}
+// aporte maior que o capital do veículo (compra + custos)
+export function erroAporte(x = {}) {
+  const linha = (l, v, cls = '') => `<div class="kv ${cls}"><span>${esc(l)}</span><strong>${brl(v)}</strong></div>`;
+  erroDlg('Aporte maior que o valor do veículo', `<p style="margin-top:0">O aporte de <strong>${brl(x.valor)}</strong> passa do valor do veículo somado aos custos${x.veiculo ? ` (<strong>${esc(x.veiculo)}</strong>)` : ''}.</p>
+    ${linha('Valor de compra', x.compra)}${linha('Custos lançados', x.custos)}${linha('Capital do veículo', x.capital, 'total')}${linha('Já aportado', x.aportado)}${linha('Disponível para aporte', x.disponivel, 'total')}
+    <p class="hint" style="margin-bottom:0">${x.disponivel > 0.009 ? `Lance no máximo ${brl(x.disponivel)}.` : 'O veículo já está todo coberto por aportes.'} Se o sócio pagou mais alguma coisa, lance antes o custo (aba Custos, com "Pago por").</p>`);
+}
 
 // diálogo modal: retorna {el, close}. onSubmit(formData, form) -> fecha se não lançar erro
 export function modal({ title, body, size = '', submitLabel = 'Salvar', onSubmit, onOpen, actions = '' }) {

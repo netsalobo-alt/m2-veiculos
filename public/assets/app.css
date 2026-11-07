@@ -195,3 +195,10 @@ textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;f
 /* duplicar anúncio: coluna estreita para o botão de remover a linha */
 .form-grid .c1{grid-column:span 1}
 .dup-row .dup-del{width:100%;margin-bottom:14px}
+
+/* pop-up de erro */
+dialog.erro-dlg{max-width:480px;border-top:4px solid var(--danger, #c0392b)}
+.erro-dlg h2{display:flex;align-items:center;gap:10px}
+.erro-ico{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--danger, #c0392b);color:#fff;font-weight:800;font-size:17px;flex:none}
+.erro-body .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)}
+.erro-body .kv.total{font-weight:700}

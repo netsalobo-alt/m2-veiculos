@@ -116,9 +116,12 @@ function checarLimite(veiculoId, valor, ignorarAporteId = null) {
   const outros = r2(db.prepare('SELECT COALESCE(SUM(valor),0) t FROM veiculo_aportes WHERE veiculo_id=? AND id IS NOT ?').get(veiculoId, ignorarAporteId).t);
   const livre = r2(Math.max(0, d.capital - outros));
   if (r2(valor) > livre + 0.009) {
-    throw bad(livre > 0
+    const e = bad(livre > 0
       ? `O aporte passa do capital do veículo. Capital (compra + custos): ${brl(d.capital)}; já aportado: ${brl(outros)}; ainda disponível: ${brl(livre)}.`
       : `O veículo já está todo coberto por aportes (capital ${brl(d.capital)}). Para aportar mais, lance antes a compra ou o custo que o sócio pagou.`);
+    e.code = 'limite_aporte';
+    e.detalhes = { veiculo: d.veiculo.descricao, compra: d.veiculo.valor_compra, custos: d.veiculo.custos_total, capital: d.capital, aportado: outros, disponivel: livre, valor: r2(valor) };
+    throw e;
   }
 }
 function validarAporte(b) {

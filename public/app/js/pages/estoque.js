@@ -1,4 +1,4 @@
-import { get, post, put, del, api, esc, brl, num, pct, dt, dth, today, can, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, bindRows, statusVeic, vdesc, CATEG, STATUS_V, FORMAS, fotoUrl, icon, pill, pessoaPicker, formData, parseMoney, moneyInput } from '../core.js';
+import { get, post, put, del, api, esc, brl, num, pct, dt, dth, today, can, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, bindRows, statusVeic, vdesc, CATEG, STATUS_V, FORMAS, fotoUrl, icon, pill, pessoaPicker, formData, parseMoney, moneyInput, erroAporte } from '../core.js';
 import { setCrumbs } from '../main.js';
 import { gerarDocumento } from './documentos.js';
 
@@ -329,7 +329,7 @@ async function tabInvest(el, v, reload) {
       <label class="check c12"><input type="checkbox" name="lancar_caixa" ${!a || a.lancamento_id ? 'checked' : ''}> Lançar no caixa como entrada "Aporte de sócios"</label>
       <p class="hint c12">Deixe marcado quando o dinheiro passou pelo caixa da loja ou quando o sócio pagou direto ao vendedor (a compra já saiu do caixa, e esta entrada compensa). Desmarque só se a compra não foi lançada no caixa.</p></div>`,
     onSubmit: async (f) => {
-      if (Number(f.valor) > livre(a) + 0.009) throw new Error(`O aporte passa do capital do veículo. Ainda disponível: ${brl(livre(a))}.`);
+      if (Number(f.valor) > livre(a) + 0.009) { erroAporte({ valor: Number(f.valor), veiculo: vdesc(v), compra: d.veiculo.valor_compra, custos: d.veiculo.custos_total, capital: d.capital, aportado: Math.round((d.aportado - (a ? a.valor : 0)) * 100) / 100, disponivel: livre(a) }); return false; }
       if (!f.socio_id) throw new Error('Escolha o sócio.');
       if (!(f.valor > 0)) throw new Error('Informe o valor.');
       if (a) await put('/aportes/' + a.id, f); else await post(`/veiculos/${v.id}/aportes`, f);
