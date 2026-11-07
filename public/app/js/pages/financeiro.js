@@ -60,7 +60,7 @@ export async function lancForm(l, onSaved) {
       <label class="c4">Categoria<input name="categoria" list="cats" value="${esc(l.categoria || '')}"><datalist id="cats">${cats[tipo].map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label>
       ${moneyField('Valor', 'valor', l.valor, { cls: 'c4', attrs: 'required' })}
       ${field('Vencimento', 'vencimento', l.vencimento || today(), { type: 'date', cls: 'c4' })}
-      ${selectField('Conta', 'conta_id', contas.map((c) => [c.id, c.nome]), l.conta_id || (contas[0] && contas[0].id), { cls: 'c4' })}
+      ${selectField('Conta', 'conta_id', contas.map((c) => [c.id, c.nome]), l.conta_id || ((contas.find((c) => c.tipo === 'banco') || contas[0] || {}).id), { cls: 'c4' })}
       ${selectField('Forma', 'forma', { '': '—', ...FORMAS }, l.forma, { cls: 'c4' })}
       ${selectField('Situação', 'status', { pendente: tipo === 'entrada' ? 'A receber' : 'A pagar', pago: tipo === 'entrada' ? 'Recebido' : 'Pago' }, l.status || 'pendente', { cls: 'c4' })}
       ${field('Data do pagamento', 'data_pagamento', l.data_pagamento || today(), { type: 'date', cls: 'c4' })}

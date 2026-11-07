@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
-const { db, DATA_DIR, getSettings } = require('./db');
+const { db, DATA_DIR, getSettings, contaPadrao } = require('./db');
 const { today, diasEntre, descVeiculo } = require('./util');
 const { bad, pick } = require('./routes-cadastros');
 
@@ -56,8 +56,8 @@ function syncCompraLancamento(v, userId) {
       .run(desc, v.valor_compra, dt, status, status === 'pago' ? dt : null, v.fornecedor_id || null, v.forma_pagamento_compra || null, ex.id);
   } else {
     db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,veiculo_id,pessoa_id,forma,conta_id,criado_por)
-      VALUES ('saida',?,'Compra de veículos',?,?,?,?,?,?,?,(SELECT id FROM contas WHERE tipo='banco' AND ativo=1 ORDER BY id LIMIT 1),?)`)
-      .run(desc, v.valor_compra, dt, status === 'pago' ? dt : null, status, v.id, v.fornecedor_id || null, v.forma_pagamento_compra || null, userId);
+      VALUES ('saida',?,'Compra de veículos',?,?,?,?,?,?,?,?,?)`)
+      .run(desc, v.valor_compra, dt, status === 'pago' ? dt : null, status, v.id, v.fornecedor_id || null, v.forma_pagamento_compra || null, contaPadrao(), userId);
   }
 }
 
@@ -71,8 +71,8 @@ function syncCustoLancamento(c, pago, userId) {
       .run(...[desc, c.valor, dt, ...(pago == null ? [] : [pago ? 'pago' : 'pendente', pago ? dt : null]), ex.id]);
   } else {
     db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,veiculo_id,custo_id,conta_id,criado_por)
-      VALUES ('saida',?,'Custos de veículos',?,?,?,?,?,?,(SELECT id FROM contas WHERE ativo=1 ORDER BY id LIMIT 1),?)`)
-      .run(desc, c.valor, dt, pago ? dt : null, pago ? 'pago' : 'pendente', c.veiculo_id, c.id, userId);
+      VALUES ('saida',?,'Custos de veículos',?,?,?,?,?,?,?,?)`)
+      .run(desc, c.valor, dt, pago ? dt : null, pago ? 'pago' : 'pendente', c.veiculo_id, c.id, contaPadrao(), userId);
   }
 }
 
