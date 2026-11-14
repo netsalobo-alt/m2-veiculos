@@ -71,9 +71,10 @@ async function fazerBackup(origem = 'manual') {
     try {
       fs.mkdirSync(DIR, { recursive: true });
       await db.backup(path.join(tmp, 'm2.db')); // cópia consistente mesmo com o sistema em uso
-      fs.writeFileSync(path.join(tmp, 'LEIA-ME.txt'), `Backup do M2 Seminovos – ${new Date().toLocaleString('pt-BR')}\n\nConteúdo: m2.db (banco) e uploads/ (fotos).\nPara restaurar: pare o sistema, copie m2.db e a pasta uploads/ para o volume de dados (apague m2.db-wal e m2.db-shm se existirem) e inicie de novo.\n`);
+      fs.writeFileSync(path.join(tmp, 'LEIA-ME.txt'), `Backup do M2 Seminovos – ${new Date().toLocaleString('pt-BR')}\n\nConteúdo: m2.db (banco), uploads/ (fotos) e anexos/ (documentos anexados aos veículos).\nPara restaurar: pare o sistema, copie m2.db e as pastas uploads/ e anexos/ para o volume de dados (apague m2.db-wal e m2.db-shm se existirem) e inicie de novo.\n`);
       const args = ['-czf', path.join(DIR, nome), '-C', tmp, 'm2.db', 'LEIA-ME.txt'];
       if (fs.existsSync(path.join(DATA_DIR, 'uploads'))) args.push('-C', DATA_DIR, 'uploads');
+      if (fs.existsSync(path.join(DATA_DIR, 'anexos'))) args.push('-C', DATA_DIR, 'anexos');
       await run('tar', args);
       status.tamanho = fs.statSync(path.join(DIR, nome)).size;
       status.local = 'ok';

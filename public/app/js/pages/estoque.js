@@ -208,7 +208,7 @@ export async function detail(view, { id, params }) {
   if (params.tab) tabAtual = params.tab;
   const custo = can('custos');
   const capa = v.fotos[0];
-  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`], ['investimento', 'Investimento']] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length})`], ...(v.categoria !== 'bike' ? [['olx', 'OLX']] : [])];
+  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`], ['investimento', 'Investimento']] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length + (v.anexos || []).length})`], ...(v.categoria !== 'bike' ? [['olx', 'OLX']] : [])];
   if (!tabs.find((t) => t[0] === tabAtual)) tabAtual = 'resumo';
 
   view.innerHTML = `<div class="ph"><div class="vhead">
@@ -653,9 +653,60 @@ function tabFotos(el, v, reload) {
   el.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { if (await confirmDlg('Excluir esta foto?', 'Excluir')) { await del('/fotos/' + b.dataset.rm); reload(); } }));
 }
 
-function tabDocs(el, v) {
-  el.innerHTML = `<div class="card"><div class="card-h"><h2>Documentos do veículo</h2><button class="btn sm" id="nd">${icon('plus')}Gerar documento</button></div>
-    ${table([{ label: 'Documento', key: 'titulo' }, { label: 'Criado', html: (d) => dth(d.criado_em) }, { label: 'Situação', html: (d) => (d.assinado_em ? pill('Assinado', 'ok') : d.status === 'enviado' ? pill('Aguardando assinatura', 'warn') : pill('Gerado')) }], v.documentos, { onRow: true, empty: 'Nenhum documento gerado.' })}</div>`;
-  bindRows(el, v.documentos, (d) => (location.hash = `#/documento/${d.id}`));
+const tamanho = (b) => (b == null ? '' : b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1).replace('.', ',')} MB`);
+const tipoAnexo = (a) => {
+  const t = a.tipo || '';
+  if (t === 'application/pdf') return 'PDF';
+  if (t.startsWith('image/')) return 'Imagem';
+  if (/word/.test(t)) return 'Word';
+  if (/sheet|excel/.test(t)) return 'Excel';
+  if (t === 'text/plain') return 'Texto';
+  return 'Arquivo';
+};
+
+function tabDocs(el, v, reload) {
+  const anexos = v.anexos || [];
+  el.innerHTML = `<div class="stack">
+    <div class="card" id="docs-gerados"><div class="card-h"><h2>Documentos gerados</h2><button class="btn sm" id="nd">${icon('plus')}Gerar documento</button></div>
+    ${table([{ label: 'Documento', key: 'titulo' }, { label: 'Criado', html: (d) => dth(d.criado_em) }, { label: 'Situação', html: (d) => (d.assinado_em ? pill('Assinado', 'ok') : d.status === 'enviado' ? pill('Aguardando assinatura', 'warn') : pill('Gerado')) }], v.documentos, { onRow: true, empty: 'Nenhum documento gerado.' })}</div>
+    <div class="card" id="docs-anexos"><div class="card-h"><h2>Anexos</h2><button class="btn sm" id="na">${icon('plus')}Anexar documento</button></div>
+    <p class="muted" style="margin:-6px 0 14px">CRLV, ATPV-e, laudo cautelar, nota fiscal, documentos do vendedor… Os anexos ficam visíveis só para a equipe, nunca no site.</p>
+    ${table([
+      { label: 'Documento', html: (a) => `<div class="t1">${esc(a.titulo)}</div><div class="t2">${esc(a.nome_original || '')}</div>` },
+      { label: 'Tipo', html: (a) => `${tipoAnexo(a)}<div class="t2">${tamanho(a.tamanho)}</div>` },
+      { label: 'Enviado', html: (a) => `${dth(a.criado_em)}<div class="t2">${esc(a.criado_por_nome || '')}</div>` },
+      { label: '', cls: 'nowrap right', html: (a) => `<a class="btn sm ghost" href="/api/anexos/${a.id}" target="_blank" rel="noopener">Abrir</a> <a class="btn sm ghost" href="/api/anexos/${a.id}?download=1">Baixar</a> <button type="button" class="btn sm ghost" data-ren="${a.id}">Renomear</button> <button type="button" class="btn sm danger" data-rma="${a.id}" aria-label="Excluir anexo">×</button>` },
+    ], anexos, { empty: 'Nenhum documento anexado.' })}</div></div>`;
+  bindRows(el.querySelector('#docs-gerados'), v.documentos, (d) => (location.hash = `#/documento/${d.id}`));
   el.querySelector('#nd').onclick = () => gerarDocumento({ veiculo_id: v.id, venda_id: v.venda && v.venda.id });
+  el.querySelector('#na').onclick = () => modal({
+    title: 'Anexar documento',
+    body: `<label>Arquivos<input type="file" name="arquivos" multiple required accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx,.xls,.xlsx,.txt,application/pdf,image/*"><span class="hint">PDF, imagem, Word, Excel ou TXT. Até 10 arquivos de no máximo 15 MB cada.</span></label>
+      ${field('Nome do documento (opcional)', 'titulo', '', { attrs: 'maxlength="150" placeholder="Ex.: CRLV 2026, Laudo cautelar"', hint: 'Usado quando você envia um arquivo só. Sem nome, usamos o nome do arquivo.' })}`,
+    submitLabel: 'Anexar',
+    onSubmit: async (d, form) => {
+      const files = [...form.querySelector('[name=arquivos]').files];
+      if (!files.length) throw new Error('Selecione ao menos um arquivo.');
+      if (files.length > 10) throw new Error('Envie no máximo 10 arquivos por vez.');
+      const grande = files.find((f) => f.size > 15 * 1024 * 1024);
+      if (grande) throw new Error(`"${grande.name}" passa de 15 MB.`);
+      const fd = new FormData();
+      files.forEach((f) => fd.append('arquivos', f));
+      if (d.titulo) fd.append('titulo', d.titulo);
+      const r = await api(`/veiculos/${v.id}/anexos`, { method: 'POST', body: fd });
+      toast(`${r.enviados} documento(s) anexado(s).`);
+      reload();
+    },
+  });
+  el.querySelectorAll('[data-ren]').forEach((b) => (b.onclick = () => {
+    const a = anexos.find((x) => String(x.id) === b.dataset.ren);
+    modal({
+      title: 'Renomear anexo', body: field('Nome do documento', 'titulo', a.titulo, { attrs: 'maxlength="150" required' }),
+      onSubmit: async (d) => { await put('/anexos/' + a.id, d); toast('Anexo renomeado.'); reload(); },
+    });
+  }));
+  el.querySelectorAll('[data-rma]').forEach((b) => (b.onclick = async () => {
+    if (!(await confirmDlg('Excluir este anexo? O arquivo será apagado do sistema.', 'Excluir'))) return;
+    try { await del('/anexos/' + b.dataset.rma); toast('Anexo excluído.'); reload(); } catch (e) { fail(e); }
+  }));
 }

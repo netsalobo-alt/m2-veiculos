@@ -18,6 +18,31 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp)$/.test(file.mimetype)),
 });
 
+// anexos do veículo: PDF, imagens e documentos de escritório, guardados fora da pasta pública
+const ANEXOS_DIR = path.join(DATA_DIR, 'anexos');
+const ANEXO_TIPOS = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif)|application\/msword|application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|application\/vnd\.ms-excel|text\/plain)$/;
+const nomeUtf8 = (n) => { try { const u = Buffer.from(n, 'latin1').toString('utf8'); return u.includes('\uFFFD') ? n : u; } catch (e) { return n; } };
+const uploadAnexo = multer({
+  storage: multer.diskStorage({
+    destination: ANEXOS_DIR,
+    filename: (req, file, cb) => cb(null, `v${req.params.id}-${crypto.randomBytes(8).toString('hex')}${(path.extname(file.originalname).toLowerCase().match(/^\.[a-z0-9]{1,5}$/) || [''])[0]}`),
+  }),
+  limits: { fileSize: 15 * 1024 * 1024, files: 10 },
+  fileFilter: (req, file, cb) => {
+    if (ANEXO_TIPOS.test(file.mimetype)) return cb(null, true);
+    cb(bad('Tipo de arquivo não aceito. Envie PDF, imagem (JPG, PNG, WEBP, HEIC), Word, Excel ou TXT.'));
+  },
+});
+function receberAnexos(req, res, next) {
+  uploadAnexo.array('arquivos', 10)(req, res, (err) => {
+    if (!err) return next();
+    (req.files || []).forEach((f) => fs.rm(f.path, () => {})); // não deixa arquivo órfão se o lote falhar
+    if (err.code === 'LIMIT_FILE_SIZE') return next(bad('Cada arquivo pode ter no máximo 15 MB.'));
+    if (err.code === 'LIMIT_FILE_COUNT') return next(bad('Envie no máximo 10 arquivos por vez.'));
+    next(err);
+  });
+}
+
 // enriquece com custos, dias no pátio e margens
 function enrich(v) {
   const custos = db.prepare('SELECT COALESCE(SUM(valor),0) t FROM veiculo_custos WHERE veiculo_id=?').get(v.id).t;
@@ -103,6 +128,7 @@ module.exports = function (api, can) {
     out.fipe_historico = db.prepare('SELECT * FROM fipe_historico WHERE veiculo_id=? ORDER BY data DESC').all(v.id);
     out.venda = db.prepare(`SELECT s.*, p.nome cliente_nome FROM vendas s JOIN pessoas p ON p.id=s.cliente_id WHERE s.veiculo_id=? AND s.status='concluida'`).get(v.id) || null;
     out.documentos = db.prepare('SELECT id,titulo,tipo,status,criado_em,assinado_em FROM documentos WHERE veiculo_id=? ORDER BY id DESC').all(v.id);
+    out.anexos = db.prepare('SELECT a.id,a.titulo,a.nome_original,a.tipo,a.tamanho,a.criado_em,u.nome criado_por_nome FROM veiculo_anexos a LEFT JOIN users u ON u.id=a.criado_por WHERE a.veiculo_id=? ORDER BY a.id DESC').all(v.id);
     if (out.venda) out.lucro = out.venda.valor_venda - out.custo_total - (out.venda.comissao_valor || 0);
     res.json(strip(req, out));
   });
@@ -144,12 +170,57 @@ module.exports = function (api, can) {
   api.delete('/veiculos/:id', can('custos'), (req, res) => {
     if (db.prepare('SELECT 1 FROM vendas WHERE veiculo_id=? OR veiculo_troca_id=?').get(req.params.id, req.params.id)) throw bad('Veículo com venda registrada não pode ser excluído.');
     const fotos = db.prepare('SELECT arquivo FROM veiculo_fotos WHERE veiculo_id=?').all(req.params.id);
+    const anexos = db.prepare('SELECT arquivo FROM veiculo_anexos WHERE veiculo_id=?').all(req.params.id);
     require('./routes-olx').aoExcluir(Number(req.params.id)); // tira da OLX antes de apagar
     db.transaction(() => {
       db.prepare('DELETE FROM lancamentos WHERE veiculo_id=? AND venda_id IS NULL').run(req.params.id);
       db.prepare('DELETE FROM veiculos WHERE id=?').run(req.params.id);
     })();
     fotos.forEach((f) => fs.rm(path.join(DATA_DIR, 'uploads', f.arquivo), () => {}));
+    anexos.forEach((a) => fs.rm(path.join(ANEXOS_DIR, a.arquivo), () => {}));
+    res.json({ ok: true });
+  });
+
+  // ---------- anexos (documentos enviados pelo usuário) ----------
+  api.post('/veiculos/:id/anexos', can('estoque'), receberAnexos, (req, res) => {
+    const files = req.files || [];
+    if (!db.prepare('SELECT 1 FROM veiculos WHERE id=?').get(req.params.id)) {
+      files.forEach((f) => fs.rm(f.path, () => {}));
+      return res.status(404).json({ error: 'Veículo não encontrado.' });
+    }
+    if (!files.length) throw bad('Selecione ao menos um arquivo.');
+    const tituloInformado = String(req.body.titulo || '').trim().slice(0, 150);
+    const ins = db.prepare('INSERT INTO veiculo_anexos(veiculo_id,titulo,arquivo,nome_original,tipo,tamanho,criado_por) VALUES (?,?,?,?,?,?,?)');
+    db.transaction(() => files.forEach((f) => {
+      const original = nomeUtf8(f.originalname).slice(0, 200);
+      const titulo = (files.length === 1 && tituloInformado) || original.replace(/\.[^.]+$/, '') || 'Documento';
+      ins.run(req.params.id, titulo, f.filename, original, f.mimetype, f.size, req.user.id);
+    }))();
+    res.json({ ok: true, enviados: files.length });
+  });
+  api.get('/anexos/:aid', can('estoque'), (req, res) => {
+    const a = db.prepare('SELECT * FROM veiculo_anexos WHERE id=?').get(req.params.aid);
+    if (!a) return res.status(404).json({ error: 'Anexo não encontrado.' });
+    const file = path.join(ANEXOS_DIR, path.basename(a.arquivo));
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'O arquivo deste anexo não foi encontrado no servidor.' });
+    const ext = path.extname(a.arquivo);
+    const nome = a.nome_original || `${a.titulo}${ext}`;
+    const inline = !req.query.download && /^(application\/pdf|image\/(jpeg|png|webp)|text\/plain)$/.test(a.tipo || '');
+    res.setHeader('Content-Type', (a.tipo || 'application/octet-stream') + (a.tipo === 'text/plain' ? '; charset=utf-8' : ''));
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${nome.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(nome)}`);
+    fs.createReadStream(file).pipe(res);
+  });
+  api.put('/anexos/:aid', can('estoque'), (req, res) => {
+    const titulo = String((req.body || {}).titulo || '').trim().slice(0, 150);
+    if (!titulo) throw bad('Informe o nome do anexo.');
+    db.prepare('UPDATE veiculo_anexos SET titulo=? WHERE id=?').run(titulo, req.params.aid);
+    res.json({ ok: true });
+  });
+  api.delete('/anexos/:aid', can('estoque'), (req, res) => {
+    const a = db.prepare('SELECT * FROM veiculo_anexos WHERE id=?').get(req.params.aid);
+    if (a) { db.prepare('DELETE FROM veiculo_anexos WHERE id=?').run(a.id); fs.rm(path.join(ANEXOS_DIR, path.basename(a.arquivo)), () => {}); }
     res.json({ ok: true });
   });
 

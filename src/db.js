@@ -180,7 +180,18 @@ CREATE TABLE IF NOT EXISTS veiculo_aportes (
 );
 CREATE INDEX IF NOT EXISTS ix_aportes_veic ON veiculo_aportes(veiculo_id);
 CREATE INDEX IF NOT EXISTS ix_aportes_socio ON veiculo_aportes(socio_id);
+-- arquivos anexados ao veículo (CRLV, ATPV, laudos, notas…). Ficam em DATA_DIR/anexos, fora da pasta pública.
+CREATE TABLE IF NOT EXISTS veiculo_anexos (
+  id INTEGER PRIMARY KEY,
+  veiculo_id INTEGER NOT NULL REFERENCES veiculos(id) ON DELETE CASCADE,
+  titulo TEXT NOT NULL,
+  arquivo TEXT NOT NULL, nome_original TEXT, tipo TEXT, tamanho INTEGER,
+  criado_por INTEGER REFERENCES users(id),
+  criado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_anexos_veic ON veiculo_anexos(veiculo_id);
 `);
+fs.mkdirSync(path.join(DATA_DIR, 'anexos'), { recursive: true });
 // colunas novas no caixa: de qual sócio é o lançamento e de qual aporte ele nasceu
 const colsLanc = db.prepare('PRAGMA table_info(lancamentos)').all().map((c) => c.name);
 if (!colsLanc.includes('socio_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN socio_id INTEGER REFERENCES socios(id)');
