@@ -218,9 +218,11 @@ module.exports = function (api, can) {
     else w.push("l.status!='cancelado'");
     if (req.query.conta_id) { w.push('l.conta_id=?'); p.push(req.query.conta_id); }
     if (req.query.categoria) { w.push('l.categoria=?'); p.push(req.query.categoria); }
-    if (req.query.q) { w.push('l.descricao LIKE ?'); p.push(`%${req.query.q}%`); }
-    res.json(db.prepare(`SELECT l.*, c.nome conta_nome, p.nome pessoa_nome, ps.nome pago_socio_nome, fu.nome funcionario_nome FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id LEFT JOIN pessoas p ON p.id=l.pessoa_id LEFT JOIN socios ps ON ps.id=l.pago_socio_id LEFT JOIN funcionarios fu ON fu.id=l.funcionario_id
-      WHERE ${w.join(' AND ')} ORDER BY ${campo} DESC, l.id DESC LIMIT 2000`).all(...p));
+    if (req.query.forma) { w.push('l.forma=?'); p.push(req.query.forma); }
+    // busca na descrição, categoria e em quem recebe/paga (cliente/fornecedor, funcionário, sócio)
+    if (req.query.q) { w.push("(l.descricao LIKE ? OR IFNULL(l.categoria,'') LIKE ? OR IFNULL(p.nome,'') LIKE ? OR IFNULL(fu.nome,'') LIKE ? OR IFNULL(so.nome,'') LIKE ? OR IFNULL(ps.nome,'') LIKE ?)"); p.push(...Array(6).fill(`%${req.query.q}%`)); }
+    res.json(db.prepare(`SELECT l.*, c.nome conta_nome, p.nome pessoa_nome, ps.nome pago_socio_nome, fu.nome funcionario_nome, so.nome socio_nome FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id LEFT JOIN pessoas p ON p.id=l.pessoa_id LEFT JOIN socios ps ON ps.id=l.pago_socio_id LEFT JOIN funcionarios fu ON fu.id=l.funcionario_id LEFT JOIN socios so ON so.id=l.socio_id
+      WHERE ${w.join(' AND ')} ORDER BY ${campo} DESC, l.id DESC LIMIT 5000`).all(...p));
   });
   api.post('/lancamentos', can('financeiro'), (req, res) => {
     const b = req.body || {};
