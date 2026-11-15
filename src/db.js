@@ -181,6 +181,15 @@ CREATE TABLE IF NOT EXISTS veiculo_aportes (
 CREATE INDEX IF NOT EXISTS ix_aportes_veic ON veiculo_aportes(veiculo_id);
 CREATE INDEX IF NOT EXISTS ix_aportes_socio ON veiculo_aportes(socio_id);
 `);
+// arquivos anexados ao veículo (CRLV, nota, laudo...). Ficam em uploads/anexos, que não é público: download só logado
+db.exec(`CREATE TABLE IF NOT EXISTS veiculo_anexos (
+  id INTEGER PRIMARY KEY,
+  veiculo_id INTEGER NOT NULL REFERENCES veiculos(id) ON DELETE CASCADE,
+  nome TEXT NOT NULL, arquivo TEXT NOT NULL, mime TEXT, tamanho INTEGER,
+  criado_por INTEGER REFERENCES users(id),
+  criado_em TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_anexos_veic ON veiculo_anexos(veiculo_id);`);
 // colunas novas no caixa: de qual sócio é o lançamento e de qual aporte ele nasceu
 const colsLanc = db.prepare('PRAGMA table_info(lancamentos)').all().map((c) => c.name);
 if (!colsLanc.includes('socio_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN socio_id INTEGER REFERENCES socios(id)');

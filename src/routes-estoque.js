@@ -76,6 +76,21 @@ function syncCustoLancamento(c, pago, userId) {
   }
 }
 
+// anexos do veículo: PDF, imagens e documentos de escritório, até 15 MB cada
+const ANEXOS_DIR = path.join(DATA_DIR, 'uploads', 'anexos');
+const ANEXO_TIPOS = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif)|application\/msword|application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|application\/vnd\.ms-excel|text\/plain)$/;
+const ANEXO_EXT = /^\.(pdf|jpe?g|png|webp|heic|heif|docx?|xlsx?|txt)$/;
+const uploadAnexo = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => { fs.mkdirSync(ANEXOS_DIR, { recursive: true }); cb(null, ANEXOS_DIR); },
+    filename: (req, file, cb) => cb(null, `v${req.params.id}-${crypto.randomBytes(8).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
+  }),
+  limits: { fileSize: 15 * 1024 * 1024, files: 10 },
+  fileFilter: (req, file, cb) => cb(null, ANEXO_TIPOS.test(file.mimetype) && ANEXO_EXT.test(path.extname(file.originalname).toLowerCase())),
+});
+// nome original vem em latin1 no multipart; corrige acentos
+const nomeOriginal = (n) => { try { return Buffer.from(n, 'latin1').toString('utf8'); } catch (e) { return n; } };
+
 module.exports = function (api, can) {
   api.get('/veiculos', can('estoque'), (req, res) => {
     const where = [], params = [];
@@ -103,6 +118,7 @@ module.exports = function (api, can) {
     out.fipe_historico = db.prepare('SELECT * FROM fipe_historico WHERE veiculo_id=? ORDER BY data DESC').all(v.id);
     out.venda = db.prepare(`SELECT s.*, p.nome cliente_nome FROM vendas s JOIN pessoas p ON p.id=s.cliente_id WHERE s.veiculo_id=? AND s.status='concluida'`).get(v.id) || null;
     out.documentos = db.prepare('SELECT id,titulo,tipo,status,criado_em,assinado_em FROM documentos WHERE veiculo_id=? ORDER BY id DESC').all(v.id);
+    out.anexos = db.prepare('SELECT a.id,a.nome,a.mime,a.tamanho,a.criado_em,u.nome criado_por_nome FROM veiculo_anexos a LEFT JOIN users u ON u.id=a.criado_por WHERE a.veiculo_id=? ORDER BY a.id DESC').all(v.id);
     if (out.venda) out.lucro = out.venda.valor_venda - out.custo_total - (out.venda.comissao_valor || 0);
     res.json(strip(req, out));
   });
@@ -144,12 +160,14 @@ module.exports = function (api, can) {
   api.delete('/veiculos/:id', can('custos'), (req, res) => {
     if (db.prepare('SELECT 1 FROM vendas WHERE veiculo_id=? OR veiculo_troca_id=?').get(req.params.id, req.params.id)) throw bad('Veículo com venda registrada não pode ser excluído.');
     const fotos = db.prepare('SELECT arquivo FROM veiculo_fotos WHERE veiculo_id=?').all(req.params.id);
+    const anexos = db.prepare('SELECT arquivo FROM veiculo_anexos WHERE veiculo_id=?').all(req.params.id);
     require('./routes-olx').aoExcluir(Number(req.params.id)); // tira da OLX antes de apagar
     db.transaction(() => {
       db.prepare('DELETE FROM lancamentos WHERE veiculo_id=? AND venda_id IS NULL').run(req.params.id);
       db.prepare('DELETE FROM veiculos WHERE id=?').run(req.params.id);
     })();
     fotos.forEach((f) => fs.rm(path.join(DATA_DIR, 'uploads', f.arquivo), () => {}));
+    anexos.forEach((a) => fs.rm(path.join(ANEXOS_DIR, a.arquivo), () => {}));
     res.json({ ok: true });
   });
 
@@ -219,6 +237,40 @@ module.exports = function (api, can) {
   api.delete('/fotos/:fid', can('estoque'), (req, res) => {
     const f = db.prepare('SELECT * FROM veiculo_fotos WHERE id=?').get(req.params.fid);
     if (f) { db.prepare('DELETE FROM veiculo_fotos WHERE id=?').run(f.id); fs.rm(path.join(DATA_DIR, 'uploads', f.arquivo), () => {}); }
+    res.json({ ok: true });
+  });
+
+  // anexos (documentos enviados)
+  api.post('/veiculos/:id/anexos', can('estoque'), (req, res, next) => {
+    if (!db.prepare('SELECT 1 FROM veiculos WHERE id=?').get(req.params.id)) return res.status(404).json({ error: 'Veículo não encontrado.' });
+    uploadAnexo.array('arquivos', 10)(req, res, (err) => {
+      if (err) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo grande demais (máximo 15 MB).' : err.code === 'LIMIT_FILE_COUNT' ? 'Envie no máximo 10 arquivos por vez.' : 'Não foi possível receber o arquivo.' });
+      const files = req.files || [];
+      if (!files.length) return res.status(400).json({ error: 'Envie arquivos PDF, imagem (JPG, PNG, WEBP, HEIC), Word, Excel ou texto.' });
+      const ins = db.prepare('INSERT INTO veiculo_anexos(veiculo_id,nome,arquivo,mime,tamanho,criado_por) VALUES (?,?,?,?,?,?)');
+      db.transaction(() => files.forEach((f) => ins.run(req.params.id, nomeOriginal(f.originalname).slice(0, 200), f.filename, f.mimetype, f.size, req.user.id)))();
+      res.json({ ok: true, enviados: files.length });
+    });
+  });
+  api.get('/anexos/:aid', can('estoque'), (req, res) => {
+    const a = db.prepare('SELECT * FROM veiculo_anexos WHERE id=?').get(req.params.aid);
+    const arq = a && path.join(ANEXOS_DIR, path.basename(a.arquivo));
+    if (!a || !fs.existsSync(arq)) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+    const nome = a.nome.replace(/["\r\n]/g, '');
+    res.setHeader('Content-Type', a.mime || 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', `${req.query.baixar || !/^(application\/pdf|image\/(jpeg|png|webp))$/.test(a.mime) ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(nome)}`);
+    fs.createReadStream(arq).pipe(res);
+  });
+  api.put('/anexos/:aid', can('estoque'), (req, res) => {
+    const nome = String((req.body || {}).nome || '').trim().slice(0, 200);
+    if (!nome) throw bad('Informe o nome do documento.');
+    db.prepare('UPDATE veiculo_anexos SET nome=? WHERE id=?').run(nome, req.params.aid);
+    res.json({ ok: true });
+  });
+  api.delete('/anexos/:aid', can('estoque'), (req, res) => {
+    const a = db.prepare('SELECT * FROM veiculo_anexos WHERE id=?').get(req.params.aid);
+    if (a) { db.prepare('DELETE FROM veiculo_anexos WHERE id=?').run(a.id); fs.rm(path.join(ANEXOS_DIR, path.basename(a.arquivo)), () => {}); }
     res.json({ ok: true });
   });
 
