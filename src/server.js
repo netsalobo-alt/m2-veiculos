@@ -150,6 +150,7 @@ app.use('/api', (err, req, res, next) => {
 
 // ---------------- arquivos estáticos ----------------
 const PUB = path.join(__dirname, '..', 'public');
+app.use('/uploads/anexos', (req, res) => res.status(404).end()); // anexos só pela API, com login
 app.use('/uploads', express.static(path.join(DATA_DIR, 'uploads'), { maxAge: '7d' }));
 app.use(express.static(PUB, { extensions: ['html'] }));
 app.get('/assinar/:token', (req, res) => res.sendFile(path.join(PUB, 'assinar.html')));

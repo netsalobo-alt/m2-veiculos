@@ -208,7 +208,7 @@ export async function detail(view, { id, params }) {
   if (params.tab) tabAtual = params.tab;
   const custo = can('custos');
   const capa = v.fotos[0];
-  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`], ['investimento', 'Investimento']] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length})`], ...(v.categoria !== 'bike' ? [['olx', 'OLX']] : [])];
+  const tabs = [['resumo', 'Resumo'], ...(custo ? [['custos', `Custos (${v.custos.length})`], ['investimento', 'Investimento']] : []), ['fipe', 'FIPE'], ['fotos', `Fotos (${v.fotos.length})`], ['documentos', `Documentos (${v.documentos.length + (v.anexos || []).length})`], ...(v.categoria !== 'bike' ? [['olx', 'OLX']] : [])];
   if (!tabs.find((t) => t[0] === tabAtual)) tabAtual = 'resumo';
 
   view.innerHTML = `<div class="ph"><div class="vhead">
@@ -231,7 +231,7 @@ export async function detail(view, { id, params }) {
   view.querySelector('#b-dup').onclick = () => duplicar(v);
   const reload = () => detail(view, { id, params: {} });
   const tab = view.querySelector('#tab');
-  ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: tabDocs, olx: tabOlx, investimento: tabInvest })[tabAtual](tab, v, reload);
+  ({ resumo: tabResumo, custos: tabCustos, fipe: tabFipe, fotos: tabFotos, documentos: (t, x) => tabDocs(t, x, reload), olx: tabOlx, investimento: tabInvest })[tabAtual](tab, v, reload);
 }
 
 // ------------------------------------------------------------------ duplicar anúncio (ex.: a mesma bike em várias cores)
@@ -653,9 +653,40 @@ function tabFotos(el, v, reload) {
   el.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { if (await confirmDlg('Excluir esta foto?', 'Excluir')) { await del('/fotos/' + b.dataset.rm); reload(); } }));
 }
 
-function tabDocs(el, v) {
-  el.innerHTML = `<div class="card"><div class="card-h"><h2>Documentos do veículo</h2><button class="btn sm" id="nd">${icon('plus')}Gerar documento</button></div>
-    ${table([{ label: 'Documento', key: 'titulo' }, { label: 'Criado', html: (d) => dth(d.criado_em) }, { label: 'Situação', html: (d) => (d.assinado_em ? pill('Assinado', 'ok') : d.status === 'enviado' ? pill('Aguardando assinatura', 'warn') : pill('Gerado')) }], v.documentos, { onRow: true, empty: 'Nenhum documento gerado.' })}</div>`;
-  bindRows(el, v.documentos, (d) => (location.hash = `#/documento/${d.id}`));
+function tabDocs(el, v, reload) {
+  const anexos = v.anexos || [];
+  const tam = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+  const tipo = (m) => (/pdf/.test(m) ? 'PDF' : /^image/.test(m) ? 'Imagem' : /word/.test(m) ? 'Word' : /excel|sheet/.test(m) ? 'Excel' : 'Texto');
+  el.innerHTML = `<div class="card"><div class="card-h"><h2>Documentos gerados</h2><button class="btn sm" id="nd">${icon('plus')}Gerar documento</button></div>
+    ${table([{ label: 'Documento', key: 'titulo' }, { label: 'Criado', html: (d) => dth(d.criado_em) }, { label: 'Situação', html: (d) => (d.assinado_em ? pill('Assinado', 'ok') : d.status === 'enviado' ? pill('Aguardando assinatura', 'warn') : pill('Gerado')) }], v.documentos, { onRow: true, empty: 'Nenhum documento gerado.' })}</div>
+    <div class="card" style="margin-top:18px" id="anx"><div class="card-h"><h2>Documentos anexados</h2>
+      <label class="btn sm" style="margin:0;cursor:pointer">${icon('plus')}Anexar documento<input type="file" id="up-anx" multiple hidden accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx,.xls,.xlsx,.txt,application/pdf,image/*"></label></div>
+      <p class="hint" style="margin:-4px 0 12px;white-space:normal">CRLV, nota fiscal, laudo, recibo... PDF, imagem, Word ou Excel, até 15 MB cada. Só abre com login.</p>
+      ${table([
+        { label: 'Documento', html: (a) => `<a class="linkbtn" href="/api/anexos/${a.id}" target="_blank" rel="noopener">${esc(a.nome)}</a><div class="t2">${tipo(a.mime)} · ${tam(a.tamanho || 0)}</div>` },
+        { label: 'Enviado', html: (a) => `${dth(a.criado_em)}${a.criado_por_nome ? `<div class="t2">${esc(a.criado_por_nome)}</div>` : ''}` },
+        { label: '', cls: 'nowrap right', html: (a) => `<a class="btn sm ghost" href="/api/anexos/${a.id}?baixar=1">Baixar</a> <button class="btn sm ghost" data-ren="${a.id}">Renomear</button> <button class="btn sm danger" data-rm="${a.id}" aria-label="Excluir ${esc(a.nome)}">×</button>` },
+      ], anexos, { empty: 'Nenhum documento anexado.' })}</div>`;
+  bindRows(el.querySelector('.card'), v.documentos, (d) => (location.hash = `#/documento/${d.id}`));
   el.querySelector('#nd').onclick = () => gerarDocumento({ veiculo_id: v.id, venda_id: v.venda && v.venda.id });
+  el.querySelector('#up-anx').onchange = async (e) => {
+    const files = [...e.target.files];
+    if (!files.length) return;
+    const grandes = files.filter((f) => f.size > 15 * 1024 * 1024);
+    if (grandes.length) { e.target.value = ''; return fail(new Error(`Arquivo grande demais (máximo 15 MB): ${grandes.map((f) => f.name).join(', ')}`)); }
+    const fd = new FormData();
+    files.slice(0, 10).forEach((f) => fd.append('arquivos', f));
+    try { const r = await api(`/veiculos/${v.id}/anexos`, { method: 'POST', body: fd }); toast(`${r.enviados} documento(s) anexado(s).`); reload(); } catch (err) { fail(err); }
+    e.target.value = '';
+  };
+  el.querySelectorAll('[data-ren]').forEach((b) => (b.onclick = () => {
+    const a = anexos.find((x) => String(x.id) === b.dataset.ren);
+    modal({ title: 'Renomear documento', body: field('Nome', 'nome', a.nome, { attrs: 'required maxlength="200"' }),
+      onSubmit: async (f) => { await put('/anexos/' + a.id, f); toast('Nome salvo.'); reload(); } });
+  }));
+  el.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => {
+    const a = anexos.find((x) => String(x.id) === b.dataset.rm);
+    if (!(await confirmDlg(`Excluir o documento "${a.nome}"? O arquivo é apagado e não pode ser recuperado.`, 'Excluir'))) return;
+    try { await del('/anexos/' + a.id); toast('Documento excluído.'); reload(); } catch (err) { fail(err); }
+  }));
 }
