@@ -190,6 +190,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS veiculo_anexos (
   criado_em TEXT DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS ix_anexos_veic ON veiculo_anexos(veiculo_id);`);
+if (!db.prepare('PRAGMA table_info(veiculo_anexos)').all().some((c) => c.name === 'descricao')) db.exec('ALTER TABLE veiculo_anexos ADD COLUMN descricao TEXT');
+// funcionários da loja (salários são lançados no financeiro ligados a eles)
+db.exec(`CREATE TABLE IF NOT EXISTS funcionarios (
+  id INTEGER PRIMARY KEY,
+  nome TEXT NOT NULL, cpf TEXT, cargo TEXT, telefone TEXT, email TEXT, pix TEXT,
+  salario REAL DEFAULT 0, admissao TEXT, demissao TEXT, observacoes TEXT,
+  ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT DEFAULT (datetime('now','localtime'))
+);`);
+// contas fixas (aluguel, luz, salários...): geram uma conta a pagar por mês
+db.exec(`CREATE TABLE IF NOT EXISTS contas_fixas (
+  id INTEGER PRIMARY KEY,
+  descricao TEXT NOT NULL, categoria TEXT, valor REAL NOT NULL DEFAULT 0,
+  dia INTEGER NOT NULL DEFAULT 10, conta_id INTEGER REFERENCES contas(id), forma TEXT, pessoa_id INTEGER REFERENCES pessoas(id),
+  inicio TEXT NOT NULL, fim TEXT, observacoes TEXT, ativo INTEGER NOT NULL DEFAULT 1,
+  criado_por INTEGER REFERENCES users(id), criado_em TEXT DEFAULT (datetime('now','localtime'))
+);`);
 // colunas novas no caixa: de qual sócio é o lançamento e de qual aporte ele nasceu
 const colsLanc = db.prepare('PRAGMA table_info(lancamentos)').all().map((c) => c.name);
 if (!colsLanc.includes('socio_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN socio_id INTEGER REFERENCES socios(id)');
@@ -197,6 +213,10 @@ if (!colsLanc.includes('aporte_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN
 // conta paga com dinheiro de um sócio: quem pagou, como trata (aporte | restituir) e o vínculo dos lançamentos gerados
 if (!colsLanc.includes('pago_socio_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN pago_socio_id INTEGER REFERENCES socios(id)');
 if (!colsLanc.includes('pago_socio_modo')) db.exec('ALTER TABLE lancamentos ADD COLUMN pago_socio_modo TEXT');
+if (!colsLanc.includes('funcionario_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN funcionario_id INTEGER REFERENCES funcionarios(id) ON DELETE SET NULL');
+if (!colsLanc.includes('conta_fixa_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN conta_fixa_id INTEGER REFERENCES contas_fixas(id) ON DELETE SET NULL');
+if (!colsLanc.includes('competencia')) db.exec('ALTER TABLE lancamentos ADD COLUMN competencia TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_lanc_fixa_mes ON lancamentos(conta_fixa_id, competencia) WHERE conta_fixa_id IS NOT NULL');
 if (!colsLanc.includes('origem_id')) db.exec('ALTER TABLE lancamentos ADD COLUMN origem_id INTEGER REFERENCES lancamentos(id) ON DELETE CASCADE');
 const colsAp = db.prepare('PRAGMA table_info(veiculo_aportes)').all().map((c) => c.name);
 if (!colsAp.includes('lancamento_id')) db.exec('ALTER TABLE veiculo_aportes ADD COLUMN lancamento_id INTEGER REFERENCES lancamentos(id) ON DELETE CASCADE');

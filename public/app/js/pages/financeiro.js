@@ -1,4 +1,4 @@
-import { get, post, put, del, esc, brl, dt, today, monthStart, monthEnd, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, pill, icon, FORMAS, MESES, can } from '../core.js';
+import { get, post, put, del, esc, brl, dt, today, monthStart, monthEnd, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, pill, icon, FORMAS, MESES, can, moneyInput } from '../core.js';
 import { setCrumbs } from '../main.js';
 
 let mesOff = 0;
@@ -48,7 +48,8 @@ export async function fluxo(view) {
 export async function lancForm(l, onSaved) {
   const tipo = l.tipo || 'saida';
   const comSocio = podeSocio({ ...l, tipo });
-  const [cats, contas, socios] = await Promise.all([get('/financeiro/categorias'), get('/contas'), comSocio ? get('/socios?simples=1') : []]);
+  const [cats, contas, socios, funcs] = await Promise.all([get('/financeiro/categorias'), get('/contas'), comSocio ? get('/socios?simples=1') : [], tipo === 'saida' ? get('/funcionarios?simples=1').catch(() => []) : []]);
+  const funcOpts = (lista) => [['', 'Escolha o funcionário…'], ...lista.filter((f) => f.ativo || f.id === l.funcionario_id).map((f) => [f.id, f.nome + (f.cargo ? ` (${f.cargo})` : '')])];
   const ativos = socios.filter((s) => !s.loja && (s.ativo || s.id === l.pago_socio_id));
   const novo = !l.id;
   const auto = l.custo_id || l.venda_id || (l.categoria === 'Compra de veículos' && l.veiculo_id);
@@ -64,6 +65,10 @@ export async function lancForm(l, onSaved) {
       ${selectField('Forma', 'forma', { '': '—', ...FORMAS }, l.forma, { cls: 'c4' })}
       ${selectField('Situação', 'status', { pendente: tipo === 'entrada' ? 'A receber' : 'A pagar', pago: tipo === 'entrada' ? 'Recebido' : 'Pago' }, l.status || 'pendente', { cls: 'c4' })}
       ${field('Data do pagamento', 'data_pagamento', l.data_pagamento || today(), { type: 'date', cls: 'c4' })}
+      ${tipo === 'saida' ? `<div class="c12" id="func-box" hidden><div style="display:flex;gap:10px;align-items:end">
+        ${selectField('Funcionário', 'funcionario_id', funcOpts(funcs), l.funcionario_id || '', { cls: 'grow' }).replace('<label class="grow"', '<label style="flex:1"')}
+        <button type="button" class="btn ghost" id="func-novo" style="margin-bottom:14px">${icon('plus')}Novo funcionário</button></div>
+        ${funcs.length ? '' : '<p class="hint" style="margin-top:-8px">Nenhum funcionário cadastrado ainda. Clique em Novo funcionário.</p>'}</div>` : ''}
       ${comSocio ? socioBloco(ativos, l) : ''}
       ${novo ? field('Repetir mensalmente (parcelas)', 'parcelas', 1, { type: 'number', cls: 'c4', attrs: 'min="1" max="60"', hint: 'Ex.: aluguel 12x, empréstimo 24x.' }) : ''}
       ${areaField('Observações', 'observacoes', l.observacoes, { rows: 2 })}</div>`,
@@ -73,11 +78,40 @@ export async function lancForm(l, onSaved) {
       const st = d.querySelector('[name=status]'), box = d.querySelector('#socio-box'), cat = d.querySelector('[name=categoria]');
       const sync = () => { if (box) box.hidden = st.value !== 'pago' || CATS_SOCIO.includes(cat.value.trim()); };
       st.addEventListener('change', sync); cat.addEventListener('input', sync); sync();
+      // categoria de salário: abre a escolha do funcionário e sugere descrição e valor
+      const fbox = d.querySelector('#func-box');
+      if (fbox) {
+        const fsel = fbox.querySelector('[name=funcionario_id]');
+        const syncF = () => { fbox.hidden = !ehSalario(cat.value); };
+        cat.addEventListener('input', syncF); cat.addEventListener('change', syncF); syncF();
+        fsel.addEventListener('change', () => {
+          const f = funcs.find((x) => String(x.id) === fsel.value);
+          if (!f) return;
+          const desc = d.querySelector('[name=descricao]'), val = d.querySelector('[name=valor]');
+          const venc = d.querySelector('[name=vencimento]').value || today();
+          if (!desc.value.trim() || /^Salário – /.test(desc.value)) desc.value = `Salário – ${f.nome} (${venc.slice(5, 7)}/${venc.slice(0, 4)})`;
+          if (!val.value.trim() && f.salario > 0) val.value = moneyInput(f.salario);
+        });
+        fbox.querySelector('#func-novo').onclick = async () => {
+          const { funcForm } = await import('./funcionarios.js');
+          funcForm(null, async () => {
+            const lista = await get('/funcionarios?simples=1');
+            funcs.splice(0, funcs.length, ...lista);
+            const novoF = lista.reduce((a, x) => (x.id > (a ? a.id : 0) ? x : a), null);
+            fsel.innerHTML = funcOpts(lista).map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join('');
+            if (novoF) { fsel.value = novoF.id; fsel.dispatchEvent(new Event('change')); }
+          });
+        };
+      }
     },
     onSubmit: async (d) => {
       d.tipo = tipo;
       if (CATS_SOCIO.includes(String(d.categoria || '').trim())) { if (d.pago_socio_id !== undefined) d.pago_socio_id = null; }
       limpaSocio(d);
+      if (d.funcionario_id !== undefined) {
+        if (!ehSalario(d.categoria)) d.funcionario_id = null;
+        else if (!d.funcionario_id) throw new Error('Escolha o funcionário deste salário.');
+      }
       if (novo) await post('/lancamentos', d); else await put('/lancamentos/' + l.id, d);
       toast('Lançamento salvo.'); onSaved && onSaved();
     },
@@ -106,6 +140,7 @@ function contasDlg(onSaved) {
 
 // campo "Quem pagou" (loja ou um sócio) e o que fazer com o valor: somar aos aportes ou restituir
 const CATS_SOCIO = ['Repasse a sócios', 'Restituição a sócios'];
+const ehSalario = (c) => /sal[aá]rio/i.test(String(c || ''));
 const podeSocio = (l) => (l.tipo || 'saida') === 'saida' && !CATS_SOCIO.includes(l.categoria) && !l.origem_id && can('custos');
 function socioBloco(ativos, l = {}) {
   if (!ativos.length) return '';
@@ -174,7 +209,7 @@ export async function lancamentos(view, { params }) {
     const hoje = today();
     view.querySelector('#lst').innerHTML = table([
       { label: 'Vencimento', html: (l) => `${dt(l.vencimento)}${l.status === 'pendente' && l.vencimento < hoje ? '<div class="t2 neg">vencido</div>' : ''}` },
-      { label: 'Descrição', html: (l) => `<div class="t1">${esc(l.descricao)}</div><div class="t2">${esc(l.categoria || '')}${l.pessoa_nome ? ' · ' + esc(l.pessoa_nome) : ''}${l.pago_socio_nome ? ` · <strong>pago por ${esc(l.pago_socio_nome)}</strong> (${l.pago_socio_modo === 'aporte' ? 'somado aos aportes' : 'a restituir'})` : ''}</div>` },
+      { label: 'Descrição', html: (l) => `<div class="t1">${esc(l.descricao)}</div><div class="t2">${esc(l.categoria || '')}${l.pessoa_nome ? ' · ' + esc(l.pessoa_nome) : ''}${l.funcionario_nome ? ' · ' + esc(l.funcionario_nome) : ''}${l.conta_fixa_id ? ' · <span class="pill info">Conta fixa</span>' : ''}${l.pago_socio_nome ? ` · <strong>pago por ${esc(l.pago_socio_nome)}</strong> (${l.pago_socio_modo === 'aporte' ? 'somado aos aportes' : 'a restituir'})` : ''}</div>` },
       { label: 'Conta', key: 'conta_nome' },
       { label: 'Situação', html: (l) => (l.status === 'pago' ? pill(`${l.tipo === 'entrada' ? 'Recebido' : 'Pago'} ${dt(l.data_pagamento)}`, 'ok') : l.vencimento < hoje ? pill('Vencido', 'bad') : pill(l.tipo === 'entrada' ? 'A receber' : 'A pagar', 'warn')) },
       { label: 'Valor', num: true, html: (l) => `<strong class="${l.tipo === 'entrada' ? 'pos' : 'neg'}">${l.tipo === 'saida' ? '– ' : ''}${brl(l.valor)}</strong>` },

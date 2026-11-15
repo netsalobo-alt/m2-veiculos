@@ -179,13 +179,16 @@ async function relatorioPDF({ titulo, subtitulo, secoes }) {
       const rows = [...(sec.linhas || [])];
       if (sec.total) rows.push({ __total: true, cells: sec.total });
       for (const r of rows) {
-        const cells = r.__total ? r.cells : r;
-        doc.font(r.__total ? 'Helvetica-Bold' : 'Helvetica').fontSize(8);
+        const cells = r.cells || r;
+        const forte = r.__total || r.bold;
+        doc.font(forte ? 'Helvetica-Bold' : 'Helvetica').fontSize(8);
         const h = Math.max(14, ...cells.map((c, i) => doc.heightOfString(String(c ?? ''), { width: widths[i] - 8 }) + 5));
         if (doc.y + h > doc.page.height - doc.page.margins.bottom) { doc.addPage(); drawHead(); }
         const y = doc.y;
         let x = left;
+        if (r.bold) doc.rect(left, y, width, h).fill('#fafafa');
         doc.fillColor(INK);
+        doc.font(forte ? 'Helvetica-Bold' : 'Helvetica').fontSize(8);
         cells.forEach((c, i) => { doc.text(String(c ?? ''), x + 4, y + 3, { width: widths[i] - 8, align: sec.colunas[i].align || 'left' }); x += widths[i]; });
         doc.moveTo(left, y + h).lineTo(left + width, y + h).lineWidth(0.5).strokeColor(r.__total ? INK : LINE).stroke();
         doc.y = y + h + 1;

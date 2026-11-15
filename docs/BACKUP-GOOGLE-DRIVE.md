@@ -1,7 +1,7 @@
 # Backup automático no Google Drive
 
 O sistema faz sozinho, todo dia às 03:00, uma cópia do banco e das fotos (`m2-backup-AAAA-MM-DD_HHMM.tar.gz`):
-- guarda as **7 últimas** cópias no servidor;
+- guarda no servidor só as **2 últimas** cópias (para não ocupar disco);
 - envia cada cópia para a pasta **M2-Backups** do seu Google Drive;
 - apaga do Drive as cópias com mais de **30 dias**. Elas vão para a lixeira do Drive, não somem de vez.
 
