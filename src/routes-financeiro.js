@@ -83,6 +83,83 @@ function relSocios(de, ate) {
   return { linhas, total };
 }
 
+// ---------- DRE gerencial: mês a mês no ano, por competência ----------
+// Vendas pela data da venda (receita, custo do carro e comissão); despesas e outras receitas pelo vencimento.
+// Movimentos de sócios, compras/custos de veículos (já no custo dos vendidos) e empréstimos ficam fora.
+const GRUPOS_DESPESA = [
+  ['pessoal', 'Pessoal', ['Salários e encargos', 'Pró-labore']],
+  ['ocupacao', 'Ocupação e estrutura', ['Aluguel', 'Água, luz e internet', 'Manutenção da loja']],
+  ['comercial', 'Comercial e marketing', ['Marketing e anúncios']],
+  ['impostos', 'Impostos e taxas', ['Impostos e taxas']],
+  ['financeiras', 'Despesas financeiras', ['Tarifas bancárias']],
+  ['administrativas', 'Administrativas e outras', ['Despachante / documentação', 'Outras despesas']],
+];
+const FORA_DESPESA = ['Compra de veículos', 'Custos de veículos', 'Comissões', 'Repasse a sócios', 'Restituição a sócios'];
+const FORA_RECEITA = ['Venda de veículos', 'Aporte de sócios', 'Adiantamento de sócios', 'Empréstimos'];
+function relDreGerencial(ano) {
+  const meses = Array.from({ length: 12 }, (_, i) => `${ano}-${String(i + 1).padStart(2, '0')}`);
+  const idx = Object.fromEntries(meses.map((m, i) => [m, i]));
+  const zero = () => Array(12).fill(0);
+  const soma = (a) => Math.round(a.reduce((x, y) => x + y, 0) * 100) / 100;
+  // vendas do ano
+  const vendas = relVendas(`${ano}-01-01`, `${ano}-12-31`).linhas;
+  const rec = zero(), cmv = zero(), com = zero(), qtd = zero(), dias = zero();
+  vendas.forEach((v) => { const i = idx[v.data.slice(0, 7)]; if (i == null) return; rec[i] += v.valor; cmv[i] += v.compra + v.custos; com[i] += v.comissao; qtd[i]++; dias[i] += v.dias; });
+  // despesas e outras receitas por categoria
+  const mov = db.prepare(`SELECT tipo, COALESCE(categoria,'Sem categoria') categoria, substr(vencimento,1,7) mes, SUM(valor) t FROM lancamentos
+    WHERE status!='cancelado' AND vencimento BETWEEN ? AND ? GROUP BY tipo, categoria, mes`).all(`${ano}-01-01`, `${ano}-12-31`);
+  const outras = {}, desp = {};
+  mov.forEach((r) => {
+    const i = idx[r.mes]; if (i == null) return;
+    if (r.tipo === 'entrada' && !FORA_RECEITA.includes(r.categoria)) (outras[r.categoria] = outras[r.categoria] || zero())[i] += r.t;
+    if (r.tipo === 'saida' && !FORA_DESPESA.includes(r.categoria)) (desp[r.categoria] = desp[r.categoria] || zero())[i] += r.t;
+  });
+  const conhecidas = GRUPOS_DESPESA.flatMap((g) => g[2]);
+  const grupos = GRUPOS_DESPESA.map(([key, label, cats]) => {
+    const itens = Object.keys(desp).filter((c) => (key === 'administrativas' ? cats.includes(c) || !conhecidas.includes(c) : cats.includes(c))).sort()
+      .map((c) => ({ label: c, valores: desp[c] }));
+    const valores = zero(); itens.forEach((it) => it.valores.forEach((v, i) => { valores[i] += v; }));
+    return { key, label, valores, itens };
+  }).filter((g) => g.itens.length);
+  const outrasItens = Object.keys(outras).sort().map((c) => ({ label: c, valores: outras[c] }));
+  const outrasTot = zero(); outrasItens.forEach((it) => it.valores.forEach((v, i) => { outrasTot[i] += v; }));
+  const despTot = zero(); grupos.forEach((g) => g.valores.forEach((v, i) => { despTot[i] += v; }));
+  const op = (f) => meses.map((_, i) => f(i));
+  const bruto = op((i) => rec[i] - cmv[i]);
+  const contrib = op((i) => bruto[i] - com[i]);
+  const operacional = op((i) => contrib[i] + outrasTot[i] - despTot[i]);
+  const L = (key, label, tipo, valores, itens) => ({ key, label, tipo, valores: valores.map((v) => Math.round(v * 100) / 100), total: soma(valores), itens: itens && itens.map((it) => ({ ...it, valores: it.valores.map((v) => Math.round(v * 100) / 100), total: soma(it.valores) })) });
+  const linhas = [
+    L('receita', '(+) Receita com vendas de veículos', 'item', rec),
+    L('cmv', '(–) Custo dos veículos vendidos (compra + preparação)', 'item', rec.map((_, i) => -cmv[i])),
+    L('bruto', '(=) Lucro bruto', 'subtotal', bruto),
+    L('comissoes', '(–) Comissões de venda', 'item', com.map((v) => -v)),
+    L('contribuicao', '(=) Margem de contribuição', 'subtotal', contrib),
+    L('outras', '(+) Outras receitas', 'grupo', outrasTot, outrasItens),
+    ...grupos.map((g) => L(g.key, `(–) ${g.label}`, 'grupo', g.valores.map((v) => -v), g.itens.map((it) => ({ ...it, valores: it.valores.map((v) => -v) })))),
+    L('despesas', '(=) Total de despesas operacionais', 'subtotal', despTot.map((v) => -v)),
+    L('resultado', '(=) Resultado do período', 'resultado', operacional),
+  ];
+  const recTotal = soma(rec);
+  linhas.forEach((l) => { l.pct = recTotal ? (l.total / recTotal) * 100 : null; (l.itens || []).forEach((it) => { it.pct = recTotal ? (it.total / recTotal) * 100 : null; }); });
+  // indicadores
+  const qT = qtd.reduce((a, b) => a + b, 0), brutoT = soma(bruto), despT = soma(despTot), comT = soma(com), outrasT = soma(outrasTot);
+  const lucroMedio = qT ? brutoT / qT : 0;
+  const mesesComDado = meses.filter((m, i) => m <= today().slice(0, 7) && (rec[i] || despTot[i] || outrasTot[i])).length || 1;
+  const indicadores = {
+    vendidos: qtd, vendidos_total: qT,
+    ticket: op((i) => (qtd[i] ? rec[i] / qtd[i] : null)), ticket_total: qT ? recTotal / qT : null,
+    lucro_bruto_medio: op((i) => (qtd[i] ? bruto[i] / qtd[i] : null)), lucro_bruto_medio_total: qT ? lucroMedio : null,
+    margem_bruta: op((i) => (rec[i] ? (bruto[i] / rec[i]) * 100 : null)), margem_bruta_total: recTotal ? (brutoT / recTotal) * 100 : null,
+    margem_liquida: op((i) => (rec[i] ? (operacional[i] / rec[i]) * 100 : null)), margem_liquida_total: recTotal ? (soma(operacional) / recTotal) * 100 : null,
+    dias_patio: op((i) => (qtd[i] ? dias[i] / qtd[i] : null)), dias_patio_total: qT ? dias.reduce((a, b) => a + b, 0) / qT : null,
+    despesa_media_mes: despT / mesesComDado,
+    // quantos carros por mês pagam as despesas, com o lucro médio por carro (já sem comissão)
+    ponto_equilibrio: qT && (brutoT - comT) > 0 ? Math.max(0, (despT - outrasT) / mesesComDado) / ((brutoT - comT) / qT) : null,
+  };
+  return { ano, meses, linhas, indicadores, receita_total: recTotal, resultado_total: soma(operacional) };
+}
+
 function relEstoque() {
   const rows = db.prepare("SELECT * FROM veiculos WHERE status!='vendido' ORDER BY data_entrada").all().map(enrich);
   const faixas = [['0–30 dias', 0, 30], ['31–60 dias', 31, 60], ['61–90 dias', 61, 90], ['Mais de 90 dias', 91, 1e9]].map(([nome, a, b]) => {
@@ -142,15 +219,16 @@ module.exports = function (api, can) {
     if (req.query.conta_id) { w.push('l.conta_id=?'); p.push(req.query.conta_id); }
     if (req.query.categoria) { w.push('l.categoria=?'); p.push(req.query.categoria); }
     if (req.query.q) { w.push('l.descricao LIKE ?'); p.push(`%${req.query.q}%`); }
-    res.json(db.prepare(`SELECT l.*, c.nome conta_nome, p.nome pessoa_nome, ps.nome pago_socio_nome FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id LEFT JOIN pessoas p ON p.id=l.pessoa_id LEFT JOIN socios ps ON ps.id=l.pago_socio_id
-      WHERE ${w.join(' AND ')} ORDER BY ${campo}, l.id LIMIT 2000`).all(...p));
+    res.json(db.prepare(`SELECT l.*, c.nome conta_nome, p.nome pessoa_nome, ps.nome pago_socio_nome, fu.nome funcionario_nome FROM lancamentos l LEFT JOIN contas c ON c.id=l.conta_id LEFT JOIN pessoas p ON p.id=l.pessoa_id LEFT JOIN socios ps ON ps.id=l.pago_socio_id LEFT JOIN funcionarios fu ON fu.id=l.funcionario_id
+      WHERE ${w.join(' AND ')} ORDER BY ${campo} DESC, l.id DESC LIMIT 2000`).all(...p));
   });
   api.post('/lancamentos', can('financeiro'), (req, res) => {
     const b = req.body || {};
     if (!['entrada', 'saida'].includes(b.tipo)) throw bad('Tipo inválido.');
     if (!b.descricao || !(Number(b.valor) > 0)) throw bad('Informe descrição e valor.');
     const parcelas = Math.max(1, Math.min(60, Number(b.parcelas) || 1));
-    const ins = db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,conta_id,forma,pessoa_id,veiculo_id,observacoes,criado_por) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const ins = db.prepare(`INSERT INTO lancamentos(tipo,descricao,categoria,valor,vencimento,data_pagamento,status,conta_id,forma,pessoa_id,veiculo_id,observacoes,funcionario_id,criado_por) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const funcId = Number(b.funcionario_id) || null;
     const socioId = b.tipo === 'saida' && b.status === 'pago' ? Number(b.pago_socio_id) || null : null;
     db.transaction(() => {
       for (let i = 0; i < parcelas; i++) {
@@ -158,7 +236,7 @@ module.exports = function (api, can) {
         d.setMonth(d.getMonth() + i);
         const venc = d.toISOString().slice(0, 10);
         const pago = i === 0 && b.status === 'pago';
-        const r = ins.run(b.tipo, parcelas > 1 ? `${b.descricao} (${i + 1}/${parcelas})` : b.descricao, b.categoria || null, Number(b.valor), venc, pago ? b.data_pagamento || venc : null, pago ? 'pago' : 'pendente', b.conta_id || null, b.forma || null, b.pessoa_id || null, b.veiculo_id || null, b.observacoes || null, req.user.id);
+        const r = ins.run(b.tipo, parcelas > 1 ? `${b.descricao} (${i + 1}/${parcelas})` : b.descricao, b.categoria || null, Number(b.valor), venc, pago ? b.data_pagamento || venc : null, pago ? 'pago' : 'pendente', b.conta_id || null, b.forma || null, b.pessoa_id || null, b.veiculo_id || null, b.observacoes || null, funcId, req.user.id);
         // só a parcela já paga pode ter sido paga por um sócio
         if (pago && socioId) require('./routes-socios').pagarPorSocio(db.prepare('SELECT * FROM lancamentos WHERE id=?').get(r.lastInsertRowid), socioId, b.pago_socio_modo, req.user.id);
       }
@@ -177,9 +255,10 @@ module.exports = function (api, can) {
       // mudou de pago para pendente, mudou o valor ou trocou quem pagou: desfaz o que foi gerado e refaz se for o caso
       const refaz = cur.pago_socio_id && (status !== 'pago' || socioId !== cur.pago_socio_id || (b.pago_socio_modo && b.pago_socio_modo !== cur.pago_socio_modo) || (b.valor != null && Number(b.valor) !== cur.valor) || (b.pago_socio_id !== undefined && !socioId));
       if (refaz) socios.desfazerPagoPorSocio(cur);
-      db.prepare('UPDATE lancamentos SET descricao=?, categoria=?, valor=?, vencimento=?, status=?, data_pagamento=?, conta_id=?, forma=?, observacoes=? WHERE id=?')
+      db.prepare('UPDATE lancamentos SET descricao=?, categoria=?, valor=?, vencimento=?, status=?, data_pagamento=?, conta_id=?, forma=?, observacoes=?, funcionario_id=? WHERE id=?')
         .run(b.descricao ?? cur.descricao, b.categoria ?? cur.categoria, Number(b.valor ?? cur.valor), b.vencimento || cur.vencimento, status,
-          status === 'pago' ? b.data_pagamento || cur.data_pagamento || today() : null, b.conta_id ?? cur.conta_id, b.forma ?? cur.forma, b.observacoes ?? cur.observacoes, cur.id);
+          status === 'pago' ? b.data_pagamento || cur.data_pagamento || today() : null, b.conta_id ?? cur.conta_id, b.forma ?? cur.forma, b.observacoes ?? cur.observacoes,
+          b.funcionario_id === undefined ? cur.funcionario_id : Number(b.funcionario_id) || null, cur.id);
       const atual = db.prepare('SELECT * FROM lancamentos WHERE id=?').get(cur.id);
       // trocou a conta: as entradas de sócio que cobrem esta saída vão junto, para continuarem se anulando
       if (atual.conta_id !== cur.conta_id && atual.conta_id) {
@@ -339,6 +418,45 @@ module.exports = function (api, can) {
           { titulo: 'Entradas realizadas por categoria', colunas: [{ label: 'Categoria', w: 4 }, { label: 'Lançamentos', w: 1, align: 'right' }, { label: 'Total', w: 2, align: 'right' }], linhas: r.entradas.map((e) => [e.categoria || '–', e.n, brl(e.total)]), total: ['Total', '', brl(r.total_entradas)] },
           { titulo: 'Saídas realizadas por categoria', colunas: [{ label: 'Categoria', w: 4 }, { label: 'Lançamentos', w: 1, align: 'right' }, { label: 'Total', w: 2, align: 'right' }], linhas: r.saidas.map((e) => [e.categoria || '–', e.n, brl(e.total)]), total: ['Total', '', brl(r.total_saidas)] },
           { titulo: 'Saldo por conta', colunas: [{ label: 'Conta', w: 4 }, { label: 'Tipo', w: 1 }, { label: 'Saldo', w: 2, align: 'right' }], linhas: r.contas.map((c) => [c.nome, c.tipo, brl(c.saldo)]) },
+        ],
+      });
+    }
+    res.json(r);
+  });
+
+  api.get('/financeiro/dre-gerencial', can('financeiro'), async (req, res) => {
+    const ano = /^\d{4}$/.test(req.query.ano || '') ? req.query.ano : today().slice(0, 4);
+    const r = relDreGerencial(ano);
+    const MES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const planas = r.linhas.flatMap((l) => [l, ...(l.itens || []).map((it) => ({ ...it, label: `   ${it.label}`, tipo: 'sub' }))]);
+    if (req.query.formato === 'csv') {
+      return csv(res, `dre_gerencial_${ano}`, ['Conta', ...MES.map((m) => `${m}/${ano}`), 'Total', '% receita'],
+        [...planas.map((l) => [l.label, ...l.valores, l.total, l.pct == null ? '' : Number(l.pct.toFixed(1))]),
+          [], ['Veículos vendidos', ...r.indicadores.vendidos, r.indicadores.vendidos_total, ''],
+          ['Ticket médio', ...r.indicadores.ticket.map((v) => v ?? ''), r.indicadores.ticket_total ?? '', ''],
+          ['Lucro bruto médio por veículo', ...r.indicadores.lucro_bruto_medio.map((v) => v ?? ''), r.indicadores.lucro_bruto_medio_total ?? '', ''],
+          ['Margem bruta %', ...r.indicadores.margem_bruta.map((v) => (v == null ? '' : Number(v.toFixed(1)))), r.indicadores.margem_bruta_total == null ? '' : Number(r.indicadores.margem_bruta_total.toFixed(1)), ''],
+          ['Margem líquida %', ...r.indicadores.margem_liquida.map((v) => (v == null ? '' : Number(v.toFixed(1)))), r.indicadores.margem_liquida_total == null ? '' : Number(r.indicadores.margem_liquida_total.toFixed(1)), '']]);
+    }
+    if (req.query.formato === 'pdf') {
+      const k = (v) => (v == null ? '–' : Math.round(v).toLocaleString('pt-BR'));
+      const ind = r.indicadores;
+      return pdf(res, `dre_gerencial_${ano}`, {
+        titulo: `DRE gerencial ${ano}`, subtitulo: 'Competência: vendas pela data da venda; despesas e outras receitas pelo vencimento. Valores em R$, sem centavos.',
+        secoes: [
+          { resumo: [['Receita com vendas', brl(r.receita_total)], ['Resultado do período', brl(r.resultado_total)], ['Margem líquida', ind.margem_liquida_total == null ? '–' : pct(r.resultado_total, r.receita_total)], ['Veículos vendidos', ind.vendidos_total],
+            ['Ticket médio', ind.ticket_total == null ? '–' : brl(ind.ticket_total)], ['Lucro bruto por veículo', ind.lucro_bruto_medio_total == null ? '–' : brl(ind.lucro_bruto_medio_total)], ['Despesa média por mês', brl(ind.despesa_media_mes)], ['Ponto de equilíbrio', ind.ponto_equilibrio == null ? '–' : `${ind.ponto_equilibrio.toFixed(1).replace('.', ',')} veículos/mês`]] },
+          { titulo: 'Demonstrativo mês a mês', colunas: [{ label: 'Conta', w: 3.2 }, ...MES.map((m) => ({ label: m, w: 0.9, align: 'right' })), { label: 'Total', w: 1.1, align: 'right' }, { label: '%', w: 0.6, align: 'right' }],
+            linhas: planas.map((l) => ({ bold: l.tipo === 'subtotal' || l.tipo === 'resultado', cells: [l.label, ...l.valores.map(k), k(l.total), l.pct == null ? '' : `${l.pct.toFixed(1).replace('.', ',')}%`] })) },
+          { titulo: 'Indicadores', colunas: [{ label: 'Indicador', w: 3.2 }, ...MES.map((m) => ({ label: m, w: 0.9, align: 'right' })), { label: 'Ano', w: 1.1, align: 'right' }, { label: '', w: 0.6 }],
+            linhas: [
+              ['Veículos vendidos', ...ind.vendidos.map(String), String(ind.vendidos_total), ''],
+              ['Ticket médio', ...ind.ticket.map(k), k(ind.ticket_total), ''],
+              ['Lucro bruto por veículo', ...ind.lucro_bruto_medio.map(k), k(ind.lucro_bruto_medio_total), ''],
+              ['Margem bruta %', ...ind.margem_bruta.map((v) => (v == null ? '–' : v.toFixed(1).replace('.', ','))), ind.margem_bruta_total == null ? '–' : ind.margem_bruta_total.toFixed(1).replace('.', ','), ''],
+              ['Margem líquida %', ...ind.margem_liquida.map((v) => (v == null ? '–' : v.toFixed(1).replace('.', ','))), ind.margem_liquida_total == null ? '–' : ind.margem_liquida_total.toFixed(1).replace('.', ','), ''],
+              ['Dias no pátio (vendidos)', ...ind.dias_patio.map((v) => (v == null ? '–' : Math.round(v))), ind.dias_patio_total == null ? '–' : Math.round(ind.dias_patio_total), ''],
+            ] },
         ],
       });
     }

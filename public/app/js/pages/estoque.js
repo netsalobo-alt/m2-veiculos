@@ -653,6 +653,34 @@ function tabFotos(el, v, reload) {
   el.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => { if (await confirmDlg('Excluir esta foto?', 'Excluir')) { await del('/fotos/' + b.dataset.rm); reload(); } }));
 }
 
+// visualizador de anexos em modal: PDF e imagem abrem dentro do sistema; outros tipos oferecem o download
+function verAnexo(anexos, idx, tipo, tam) {
+  let i = idx;
+  const m = modal({ title: 'Documento', size: 'xwide', body: '<div id="vw"></div>' });
+  m.el.classList.add('viewer');
+  const desenhar = () => {
+    const a = anexos[i];
+    const url = `/api/anexos/${a.id}`;
+    const img = /^image\/(jpeg|png|webp)$/.test(a.mime), pdf = a.mime === 'application/pdf';
+    m.el.querySelector('.dialog-top h2').textContent = a.nome;
+    m.el.querySelector('#vw').innerHTML = `
+      ${a.descricao ? `<p style="margin:0 0 12px;white-space:pre-wrap">${esc(a.descricao)}</p>` : ''}
+      <div class="vw-area">${pdf ? `<iframe src="${url}#view=FitH" title="${esc(a.nome)}"></iframe>` : img ? `<img src="${url}" alt="${esc(a.descricao || a.nome)}">`
+        : `<div class="empty" style="padding:40px 16px">Este tipo de arquivo (${tipo(a.mime)}) não abre no navegador.<br><a class="btn" style="margin-top:14px" href="${url}?baixar=1">Baixar ${esc(a.nome)}</a></div>`}</div>
+      <div class="vw-bar"><span class="muted">${tipo(a.mime)} · ${tam(a.tamanho || 0)} · ${dth(a.criado_em)}${a.criado_por_nome ? ' · ' + esc(a.criado_por_nome) : ''}</span>
+        <span class="vw-acts">${anexos.length > 1 ? `<button class="btn sm ghost" data-p ${i === 0 ? 'disabled' : ''} aria-label="Documento anterior">←</button><span class="muted">${i + 1} de ${anexos.length}</span><button class="btn sm ghost" data-n ${i === anexos.length - 1 ? 'disabled' : ''} aria-label="Próximo documento">→</button>` : ''}
+        <a class="btn sm ghost" href="${url}" target="_blank" rel="noopener">Abrir em nova aba</a><a class="btn sm" href="${url}?baixar=1">Baixar</a></span></div>`;
+    const p = m.el.querySelector('[data-p]'), n = m.el.querySelector('[data-n]');
+    if (p) p.onclick = () => { i--; desenhar(); };
+    if (n) n.onclick = () => { i++; desenhar(); };
+  };
+  m.el.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' && i > 0) { i--; desenhar(); }
+    if (e.key === 'ArrowRight' && i < anexos.length - 1) { i++; desenhar(); }
+  });
+  desenhar();
+}
+
 function tabDocs(el, v, reload) {
   const anexos = v.anexos || [];
   const tam = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
@@ -663,9 +691,9 @@ function tabDocs(el, v, reload) {
       <label class="btn sm" style="margin:0;cursor:pointer">${icon('plus')}Anexar documento<input type="file" id="up-anx" multiple hidden accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.doc,.docx,.xls,.xlsx,.txt,application/pdf,image/*"></label></div>
       <p class="hint" style="margin:-4px 0 12px;white-space:normal">CRLV, nota fiscal, laudo, recibo... PDF, imagem, Word ou Excel, até 15 MB cada. Só abre com login.</p>
       ${table([
-        { label: 'Documento', html: (a) => `<a class="linkbtn" href="/api/anexos/${a.id}" target="_blank" rel="noopener">${esc(a.nome)}</a><div class="t2">${tipo(a.mime)} · ${tam(a.tamanho || 0)}</div>` },
+        { label: 'Documento', html: (a) => `<button type="button" class="linkbtn" data-ver="${a.id}" style="text-align:left">${esc(a.nome)}</button>${a.descricao ? `<div class="t1" style="font-weight:400;white-space:normal">${esc(a.descricao)}</div>` : ''}<div class="t2">${tipo(a.mime)} · ${tam(a.tamanho || 0)}</div>` },
         { label: 'Enviado', html: (a) => `${dth(a.criado_em)}${a.criado_por_nome ? `<div class="t2">${esc(a.criado_por_nome)}</div>` : ''}` },
-        { label: '', cls: 'nowrap right', html: (a) => `<a class="btn sm ghost" href="/api/anexos/${a.id}?baixar=1">Baixar</a> <button class="btn sm ghost" data-ren="${a.id}">Renomear</button> <button class="btn sm danger" data-rm="${a.id}" aria-label="Excluir ${esc(a.nome)}">×</button>` },
+        { label: '', cls: 'nowrap right', html: (a) => `<button class="btn sm" data-ver="${a.id}">Visualizar</button> <a class="btn sm ghost" href="/api/anexos/${a.id}?baixar=1">Baixar</a> <button class="btn sm ghost" data-ren="${a.id}">Editar</button> <button class="btn sm danger" data-rm="${a.id}" aria-label="Excluir ${esc(a.nome)}">×</button>` },
       ], anexos, { empty: 'Nenhum documento anexado.' })}</div>`;
   bindRows(el.querySelector('.card'), v.documentos, (d) => (location.hash = `#/documento/${d.id}`));
   el.querySelector('#nd').onclick = () => gerarDocumento({ veiculo_id: v.id, venda_id: v.venda && v.venda.id });
@@ -674,16 +702,29 @@ function tabDocs(el, v, reload) {
     if (!files.length) return;
     const grandes = files.filter((f) => f.size > 15 * 1024 * 1024);
     if (grandes.length) { e.target.value = ''; return fail(new Error(`Arquivo grande demais (máximo 15 MB): ${grandes.map((f) => f.name).join(', ')}`)); }
-    const fd = new FormData();
-    files.slice(0, 10).forEach((f) => fd.append('arquivos', f));
-    try { const r = await api(`/veiculos/${v.id}/anexos`, { method: 'POST', body: fd }); toast(`${r.enviados} documento(s) anexado(s).`); reload(); } catch (err) { fail(err); }
+    const lista = files.slice(0, 10);
     e.target.value = '';
+    modal({
+      title: lista.length > 1 ? `Anexar ${lista.length} documentos` : 'Anexar documento', size: 'wide', submitLabel: 'Enviar',
+      body: `<p class="muted" style="margin-top:0">Descreva cada arquivo para identificar depois (opcional). Ex.: "CRLV 2026 em nome do vendedor", "Laudo cautelar aprovado".</p>
+        ${lista.map((f, i) => `<label>${esc(f.name)} <span class="muted" style="font-weight:400">· ${tam(f.size)}</span><textarea name="desc_${i}" rows="2" maxlength="500" placeholder="Descrição do documento"></textarea></label>`).join('')}
+        ${files.length > 10 ? '<p class="hint">Só os 10 primeiros arquivos serão enviados.</p>' : ''}`,
+      onOpen: (d) => { const t = d.querySelector('textarea'); if (t) t.focus(); },
+      onSubmit: async (f) => {
+        const fd = new FormData();
+        lista.forEach((_, i) => fd.append('descricoes', f['desc_' + i] || ''));
+        lista.forEach((x) => fd.append('arquivos', x));
+        const r = await api(`/veiculos/${v.id}/anexos`, { method: 'POST', body: fd });
+        toast(`${r.enviados} documento(s) anexado(s).`); reload();
+      },
+    });
   };
   el.querySelectorAll('[data-ren]').forEach((b) => (b.onclick = () => {
     const a = anexos.find((x) => String(x.id) === b.dataset.ren);
-    modal({ title: 'Renomear documento', body: field('Nome', 'nome', a.nome, { attrs: 'required maxlength="200"' }),
-      onSubmit: async (f) => { await put('/anexos/' + a.id, f); toast('Nome salvo.'); reload(); } });
+    modal({ title: 'Editar documento', body: field('Nome', 'nome', a.nome, { attrs: 'required maxlength="200"' }) + areaField('Descrição', 'descricao', a.descricao, { rows: 3 }),
+      onSubmit: async (f) => { await put('/anexos/' + a.id, f); toast('Documento salvo.'); reload(); } });
   }));
+  el.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = () => verAnexo(anexos, anexos.findIndex((x) => String(x.id) === b.dataset.ver), tipo, tam)));
   el.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = async () => {
     const a = anexos.find((x) => String(x.id) === b.dataset.rm);
     if (!(await confirmDlg(`Excluir o documento "${a.nome}"? O arquivo é apagado e não pode ser recuperado.`, 'Excluir'))) return;

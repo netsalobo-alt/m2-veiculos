@@ -140,6 +140,8 @@ require('./routes-site')(api, can);
 require('./routes-olx')(api, can);
 require('./routes-socios')(api, can);
 require('./backup').rotas(api, can);
+require('./routes-contas-fixas').rotas(api, can);
+require('./routes-funcionarios')(api, can);
 app.use('/api', api);
 
 // erros
@@ -161,5 +163,6 @@ const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => console.log(`[M2] Sistema rodando em http://localhost:${PORT}`));
   require('./backup').agendar(); // backup diário (BACKUP_HORA)
+  require('./routes-contas-fixas').agendar(); // contas fixas viram contas a pagar todo mês
 }
 module.exports = app;

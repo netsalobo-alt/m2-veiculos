@@ -1,5 +1,5 @@
 // Backup do M2 Seminovos: cópia consistente do banco (API de backup do SQLite) + fotos, em um .tar.gz.
-// - Guarda as últimas cópias em DATA_DIR/backups (BACKUP_LOCAL, padrão 7)
+// - Guarda no servidor no máximo as 2 últimas cópias, em DATA_DIR/backups (BACKUP_LOCAL pode baixar para 1)
 // - Envia ao Google Drive (ou outro destino do rclone) quando configurado, apagando lá os de mais de BACKUP_DIAS (padrão 30)
 // - Roda todo dia em BACKUP_HORA (padrão 03:00, fuso do container) e também sob demanda pelo sistema
 //
@@ -15,7 +15,7 @@ const { db, DATA_DIR } = require('./db');
 const DIR = path.join(DATA_DIR, 'backups');
 const PASTA = process.env.BACKUP_PASTA || 'M2-Backups';
 const DIAS = Math.max(1, Number(process.env.BACKUP_DIAS) || 30);
-const LOCAL = Math.max(1, Number(process.env.BACKUP_LOCAL) || 7);
+const LOCAL = Math.min(2, Math.max(1, Number(process.env.BACKUP_LOCAL) || 2));
 const HORA = /^\d{2}:\d{2}$/.test(process.env.BACKUP_HORA || '') ? process.env.BACKUP_HORA : '03:00';
 const NOME = /^m2-backup-\d{4}-\d{2}-\d{2}_\d{4}\.tar\.gz$/;
 

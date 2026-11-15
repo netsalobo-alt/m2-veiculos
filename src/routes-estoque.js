@@ -118,7 +118,7 @@ module.exports = function (api, can) {
     out.fipe_historico = db.prepare('SELECT * FROM fipe_historico WHERE veiculo_id=? ORDER BY data DESC').all(v.id);
     out.venda = db.prepare(`SELECT s.*, p.nome cliente_nome FROM vendas s JOIN pessoas p ON p.id=s.cliente_id WHERE s.veiculo_id=? AND s.status='concluida'`).get(v.id) || null;
     out.documentos = db.prepare('SELECT id,titulo,tipo,status,criado_em,assinado_em FROM documentos WHERE veiculo_id=? ORDER BY id DESC').all(v.id);
-    out.anexos = db.prepare('SELECT a.id,a.nome,a.mime,a.tamanho,a.criado_em,u.nome criado_por_nome FROM veiculo_anexos a LEFT JOIN users u ON u.id=a.criado_por WHERE a.veiculo_id=? ORDER BY a.id DESC').all(v.id);
+    out.anexos = db.prepare('SELECT a.id,a.nome,a.descricao,a.mime,a.tamanho,a.criado_em,u.nome criado_por_nome FROM veiculo_anexos a LEFT JOIN users u ON u.id=a.criado_por WHERE a.veiculo_id=? ORDER BY a.id DESC').all(v.id);
     if (out.venda) out.lucro = out.venda.valor_venda - out.custo_total - (out.venda.comissao_valor || 0);
     res.json(strip(req, out));
   });
@@ -247,8 +247,10 @@ module.exports = function (api, can) {
       if (err) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo grande demais (máximo 15 MB).' : err.code === 'LIMIT_FILE_COUNT' ? 'Envie no máximo 10 arquivos por vez.' : 'Não foi possível receber o arquivo.' });
       const files = req.files || [];
       if (!files.length) return res.status(400).json({ error: 'Envie arquivos PDF, imagem (JPG, PNG, WEBP, HEIC), Word, Excel ou texto.' });
-      const ins = db.prepare('INSERT INTO veiculo_anexos(veiculo_id,nome,arquivo,mime,tamanho,criado_por) VALUES (?,?,?,?,?,?)');
-      db.transaction(() => files.forEach((f) => ins.run(req.params.id, nomeOriginal(f.originalname).slice(0, 200), f.filename, f.mimetype, f.size, req.user.id)))();
+      // descrição de cada arquivo, na mesma ordem do envio (opcional)
+      const descs = [].concat(req.body.descricoes ?? []).map((x) => String(x || '').trim().slice(0, 500) || null);
+      const ins = db.prepare('INSERT INTO veiculo_anexos(veiculo_id,nome,descricao,arquivo,mime,tamanho,criado_por) VALUES (?,?,?,?,?,?,?)');
+      db.transaction(() => files.forEach((f, i) => ins.run(req.params.id, nomeOriginal(f.originalname).slice(0, 200), descs[i] || null, f.filename, f.mimetype, f.size, req.user.id)))();
       res.json({ ok: true, enviados: files.length });
     });
   });
@@ -263,9 +265,10 @@ module.exports = function (api, can) {
     fs.createReadStream(arq).pipe(res);
   });
   api.put('/anexos/:aid', can('estoque'), (req, res) => {
-    const nome = String((req.body || {}).nome || '').trim().slice(0, 200);
+    const b = req.body || {};
+    const nome = String(b.nome || '').trim().slice(0, 200);
     if (!nome) throw bad('Informe o nome do documento.');
-    db.prepare('UPDATE veiculo_anexos SET nome=? WHERE id=?').run(nome, req.params.aid);
+    db.prepare('UPDATE veiculo_anexos SET nome=?, descricao=? WHERE id=?').run(nome, String(b.descricao || '').trim().slice(0, 500) || null, req.params.aid);
     res.json({ ok: true });
   });
   api.delete('/anexos/:aid', can('estoque'), (req, res) => {

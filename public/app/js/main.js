@@ -14,7 +14,10 @@ const NAV = [
   { grp: 'Financeiro' },
   { href: '#/financeiro', label: 'Fluxo de caixa', icon: 'cash', perm: 'financeiro', page: 'financeiro' },
   { href: '#/lancamentos', label: 'Contas a pagar e receber', icon: 'list', perm: 'financeiro', page: 'lancamentos' },
+  { href: '#/contas-fixas', label: 'Contas fixas', icon: 'refresh', perm: 'financeiro', page: 'contasfixas' },
+  { href: '#/funcionarios', label: 'Funcionários', icon: 'user', perm: 'financeiro', page: 'funcionarios' },
   { href: '#/socios', label: 'Sócios e investimentos', icon: 'users', perm: 'custos', page: 'socios' },
+  { href: '#/dre', label: 'DRE gerencial', icon: 'chart', perm: 'financeiro', page: 'dre' },
   { href: '#/relatorios', label: 'Relatórios', icon: 'chart', perm: 'relatorios', page: 'relatorios' },
   { grp: 'Administração' },
   { href: '#/usuarios', label: 'Usuários', icon: 'user', perm: 'usuarios', page: 'usuarios' },
@@ -40,6 +43,10 @@ const ROUTES = [
   [/^\/modelo\/(\d+|novo)$/, 'modelos', 'edit'],
   [/^\/financeiro$/, 'financeiro', 'fluxo'],
   [/^\/lancamentos$/, 'financeiro', 'lancamentos'],
+  [/^\/contas-fixas$/, 'contasfixas', 'render'],
+  [/^\/dre$/, 'dre', 'render'],
+  [/^\/funcionarios$/, 'funcionarios', 'list'],
+  [/^\/funcionario\/(\d+)$/, 'funcionarios', 'detail'],
   [/^\/relatorios$/, 'relatorios', 'render'],
   [/^\/usuarios$/, 'usuarios', 'render'],
   [/^\/config$/, 'config', 'render'],
@@ -91,7 +98,7 @@ async function route() {
     const m = path.match(re);
     if (!m) continue;
     document.querySelectorAll('.side a[data-page]').forEach((a) => a.toggleAttribute('aria-current', false));
-    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', site: 'site', socios: 'socios', relatorios: 'relatorios', dashboard: 'dashboard' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
+    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', site: 'site', socios: 'socios', relatorios: 'relatorios', dashboard: 'dashboard', contasfixas: 'contasfixas', funcionarios: 'funcionarios', dre: 'dre' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
     const a = document.querySelector(`.side a[data-page="${navPage}"]`);
     if (a) a.setAttribute('aria-current', 'page');
     view.innerHTML = '<div class="empty">Carregando…</div>';
