@@ -185,50 +185,124 @@ async function baixa(l, onSaved) {
 }
 
 // ------------------------------------------------------------------ contas a pagar / receber
-const lf = { aba: 'receber', de: '', ate: '', q: '' };
+// filtros da lista (ficam guardados enquanto o sistema está aberto)
+const lf = { tipo: 'saida', per: 'mes', off: 0, de: '', ate: '', sit: '', q: '', cat: '', conta: '', forma: '', filtros: false };
+const MESES_LONGO = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function periodo() {
+  const h = new Date(); h.setHours(12, 0, 0, 0);
+  if (lf.per === 'hoje') return { de: iso(h), ate: iso(h), label: 'Hoje' };
+  if (lf.per === 'semana') { const a = new Date(h); a.setDate(h.getDate() - ((h.getDay() + 6) % 7)); const b = new Date(a); b.setDate(a.getDate() + 6); return { de: iso(a), ate: iso(b), label: 'Esta semana' }; }
+  if (lf.per === 'todo') return { de: '', ate: '', label: 'Todo o período' };
+  if (lf.per === 'custom') return { de: lf.de, ate: lf.ate, label: lf.de || lf.ate ? `${lf.de ? dt(lf.de) : '…'} a ${lf.ate ? dt(lf.ate) : '…'}` : 'Escolha o período' };
+  const a = new Date(h.getFullYear(), h.getMonth() + lf.off, 1, 12), b = new Date(h.getFullYear(), h.getMonth() + lf.off + 1, 0, 12);
+  return { de: iso(a), ate: iso(b), label: `${MESES_LONGO[a.getMonth()]} de ${a.getFullYear()}`, mes: true };
+}
+const situacao = (l, hoje) => (l.status === 'pago' ? 'pago' : l.vencimento < hoje ? 'vencido' : l.vencimento === hoje ? 'hoje' : 'avencer');
+
 export async function lancamentos(view, { params }) {
   setCrumbs('Financeiro', 'Contas a pagar e receber');
-  if (params.status === 'vencido') lf.aba = 'vencido';
-  const ABAS = [['receber', 'A receber'], ['pagar', 'A pagar'], ['vencido', 'Vencidos'], ['pago', 'Pagos / recebidos'], ['todos', 'Todos']];
-  view.innerHTML = `<div class="ph"><div><p class="eyebrow">FINANCEIRO</p><h1>Contas a pagar e receber</h1><p>Baixe recebimentos e pagamentos e acompanhe vencimentos.</p></div>
-    <div class="acts"><button class="btn ghost" id="nsai">${icon('plus')}Nova saída</button><button class="btn" id="nent">${icon('plus')}Nova entrada</button></div></div>
-    <div class="tabs" role="tablist">${ABAS.map(([k, l]) => `<button role="tab" data-aba="${k}" aria-selected="${lf.aba === k}">${l}</button>`).join('')}</div>
-    <div class="filters"><input type="search" id="q" placeholder="Buscar descrição" value="${esc(lf.q)}" aria-label="Buscar">
-      <label>Vencimento de<input type="date" id="de" value="${lf.de}"></label><label>até<input type="date" id="ate" value="${lf.ate}"></label></div>
-    <div id="tot" class="grid g3" style="margin-bottom:16px"></div><div id="lst"></div>`;
+  if (params.status === 'vencido') Object.assign(lf, { tipo: 'todos', per: 'todo', sit: 'vencido' });
+  const [cats, contas] = await Promise.all([get('/financeiro/categorias'), get('/contas')]);
+  const TIPOS = [['saida', 'A pagar'], ['entrada', 'A receber'], ['todos', 'Todos']];
+  const PERS = [['hoje', 'Hoje'], ['semana', 'Esta semana'], ['passado', 'Mês passado'], ['mes', 'Este mês'], ['proximo', 'Próximo mês'], ['todo', 'Todo o período'], ['custom', 'Escolha o período']];
+  view.innerHTML = `<div class="ph"><div><p class="eyebrow">FINANCEIRO</p><h1>Contas a pagar e receber</h1><p>Baixe pagamentos e recebimentos e acompanhe os vencimentos.</p></div>
+    <div class="acts"><a class="btn ghost" href="#/contas-fixas">Contas fixas</a><button class="btn ghost" id="nsai">${icon('plus')}Nova saída</button><button class="btn" id="nent">${icon('plus')}Nova entrada</button></div></div>
+    <div class="fx-bar">
+      <div class="seg" role="group" aria-label="Tipo">${TIPOS.map(([k, l]) => `<button type="button" data-tipo="${k}" aria-pressed="${lf.tipo === k}">${l}</button>`).join('')}</div>
+      <div class="fx-right">
+        <div class="seg fx-per" role="group" aria-label="Período">
+          <button type="button" id="p-prev" aria-label="Mês anterior">←</button>
+          <div class="fx-drop"><button type="button" id="p-btn" aria-haspopup="true" aria-expanded="false"><span id="p-lbl"></span> ▾</button>
+            <div class="fx-menu" id="p-menu" hidden>${PERS.map(([k, l]) => `<button type="button" data-per="${k}">${l}</button>`).join('')}
+              <div class="fx-custom" id="p-custom" hidden><label>De<input type="date" id="p-de"></label><label>Até<input type="date" id="p-ate"></label><button type="button" class="btn sm" id="p-ok">Aplicar</button></div></div></div>
+          <button type="button" id="p-next" aria-label="Próximo mês">→</button></div>
+        <button type="button" class="btn ghost" id="f-tog" aria-expanded="${lf.filtros}">${icon('list')}Filtros<b class="count" id="f-n" hidden></b></button>
+      </div>
+    </div>
+    <div class="fx-adv" id="f-adv" ${lf.filtros ? '' : 'hidden'}>
+      <input type="search" id="q" placeholder="Buscar descrição, cliente, fornecedor, funcionário…" value="${esc(lf.q)}" aria-label="Buscar">
+      <label>Plano de contas<select id="f-cat"><option value="">Todas as categorias</option>${[...new Set([...cats.saida, ...cats.entrada])].sort().map((c) => `<option ${lf.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+      <label>Conta<select id="f-conta"><option value="">Todas as contas</option>${contas.map((c) => `<option value="${c.id}" ${String(lf.conta) === String(c.id) ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select></label>
+      <label>Pagamento<select id="f-forma"><option value="">Todas as formas</option>${Object.entries(FORMAS).map(([k, v]) => `<option value="${k}" ${lf.forma === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+      <button type="button" class="btn ghost sm" id="f-limpa">Limpar filtros</button>
+    </div>
+    <div id="cards" class="fx-cards"></div><div id="lst"></div>`;
+  const menu = view.querySelector('#p-menu'), pbtn = view.querySelector('#p-btn');
+  const fecharMenu = () => { menu.hidden = true; pbtn.setAttribute('aria-expanded', 'false'); };
   const load = async () => {
-    const qs = new URLSearchParams({ de: lf.de, ate: lf.ate, q: lf.q });
-    if (lf.aba === 'receber') { qs.set('tipo', 'entrada'); qs.set('status', 'pendente'); }
-    if (lf.aba === 'pagar') { qs.set('tipo', 'saida'); qs.set('status', 'pendente'); }
-    if (lf.aba === 'vencido') qs.set('status', 'vencido');
-    if (lf.aba === 'pago') { qs.set('status', 'pago'); qs.set('por', 'pagamento'); }
-    const rows = await get('/lancamentos?' + qs);
-    const ent = rows.filter((l) => l.tipo === 'entrada').reduce((a, l) => a + l.valor, 0);
-    const sai = rows.filter((l) => l.tipo === 'saida').reduce((a, l) => a + l.valor, 0);
-    view.querySelector('#tot').innerHTML = `<div class="kpi"><div class="k">Entradas listadas</div><div class="v pos">${brl(ent)}</div></div><div class="kpi"><div class="k">Saídas listadas</div><div class="v neg">${brl(sai)}</div></div><div class="kpi"><div class="k">Lançamentos</div><div class="v">${rows.length}</div></div>`;
+    const per = periodo();
+    view.querySelector('#p-lbl').textContent = per.label;
+    view.querySelector('#p-prev').hidden = view.querySelector('#p-next').hidden = !per.mes;
+    view.querySelectorAll('[data-tipo]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.tipo === lf.tipo));
+    const nf = [lf.q, lf.cat, lf.conta, lf.forma].filter(Boolean).length;
+    const fn = view.querySelector('#f-n'); fn.textContent = nf; fn.hidden = !nf;
+    const qs = new URLSearchParams({ por: 'pagamento', de: per.de, ate: per.ate, q: lf.q, categoria: lf.cat, conta_id: lf.conta, forma: lf.forma });
+    if (lf.tipo !== 'todos') qs.set('tipo', lf.tipo);
+    const todos = await get('/lancamentos?' + qs);
     const hoje = today();
+    const ent = lf.tipo === 'entrada', ambos = lf.tipo === 'todos';
+    // cartões: totais por situação no período
+    const grupo = (sit) => todos.filter((l) => !sit || situacao(l, hoje) === sit);
+    const valor = (rows) => rows.reduce((a, l) => a + (ambos && l.tipo === 'saida' ? -l.valor : l.valor), 0);
+    const totAbs = todos.reduce((a, l) => a + l.valor, 0) || 1;
+    const CARDS = [
+      ['', 'Total do período', icon('cash'), ent ? 'recebimentos do período' : ambos ? 'entradas menos saídas' : 'pagamentos do período', ''],
+      ['vencido', 'Vencidos', '!', 'passaram do vencimento', 'bad'],
+      ['hoje', 'Vencem hoje', '◷', 'até o fim do dia', 'warn'],
+      ['avencer', 'A vencer', '▦', 'ainda no prazo', 'info'],
+      ['pago', ent ? 'Recebidos' : ambos ? 'Pagos e recebidos' : 'Pagos', '✓', 'já baixados', 'ok'],
+    ];
+    view.querySelector('#cards').innerHTML = CARDS.map(([k, label, ico, sub, cls]) => {
+      const rows = grupo(k), abs = rows.reduce((a, l) => a + l.valor, 0), pct = k ? Math.round((abs / totAbs) * 100) : 100;
+      const v = valor(rows);
+      return `<button type="button" class="fx-card ${cls} ${lf.sit === k ? 'on' : ''}" data-sit="${k}" aria-pressed="${lf.sit === k}">
+        <span class="fx-ico">${ico}</span><span class="fx-ring" style="--p:${pct}"><span>${pct}%</span></span>
+        <span class="fx-k">${label}</span><span class="fx-v ${ambos && v < 0 ? 'neg' : ''}">${brl(v)}</span><span class="fx-s">${rows.length} lançamento(s) · ${sub}</span></button>`;
+    }).join('');
+    const rows = grupo(lf.sit);
+    const quem = (l) => l.funcionario_nome || l.pessoa_nome || l.socio_nome || '';
     view.querySelector('#lst').innerHTML = table([
-      { label: 'Vencimento', html: (l) => `${dt(l.vencimento)}${l.status === 'pendente' && l.vencimento < hoje ? '<div class="t2 neg">vencido</div>' : ''}` },
-      { label: 'Descrição', html: (l) => `<div class="t1">${esc(l.descricao)}</div><div class="t2">${esc(l.categoria || '')}${l.pessoa_nome ? ' · ' + esc(l.pessoa_nome) : ''}${l.funcionario_nome ? ' · ' + esc(l.funcionario_nome) : ''}${l.conta_fixa_id ? ' · <span class="pill info">Conta fixa</span>' : ''}${l.pago_socio_nome ? ` · <strong>pago por ${esc(l.pago_socio_nome)}</strong> (${l.pago_socio_modo === 'aporte' ? 'somado aos aportes' : 'a restituir'})` : ''}</div>` },
-      { label: 'Conta', key: 'conta_nome' },
-      { label: 'Situação', html: (l) => (l.status === 'pago' ? pill(`${l.tipo === 'entrada' ? 'Recebido' : 'Pago'} ${dt(l.data_pagamento)}`, 'ok') : l.vencimento < hoje ? pill('Vencido', 'bad') : pill(l.tipo === 'entrada' ? 'A receber' : 'A pagar', 'warn')) },
+      { label: 'Descrição', html: (l) => `<div class="t1">${esc(l.descricao)}</div><div class="t2">${l.tipo === 'entrada' ? '<span class="pos">Entrada</span>' : '<span class="neg">Saída</span>'}${l.conta_fixa_id ? ' · <span class="pill info">Conta fixa</span>' : ''}${l.pago_socio_nome ? ` · pago por ${esc(l.pago_socio_nome)} (${l.pago_socio_modo === 'aporte' ? 'aporte' : 'a restituir'})` : ''}</div>` },
+      { label: 'Entidade', html: (l) => (quem(l) ? esc(quem(l)) : '<span class="muted">—</span>') },
+      { label: 'Plano de contas', html: (l) => esc(l.categoria || '—') },
+      { label: 'Pagamento', html: (l) => `${esc(FORMAS[l.forma] || l.forma || '—')}${l.conta_nome ? `<div class="t2">${esc(l.conta_nome)}</div>` : ''}` },
+      { label: 'Data', html: (l) => (l.status === 'pago' ? `${dt(l.data_pagamento)}<div class="t2">venc. ${dt(l.vencimento)}</div>` : dt(l.vencimento)) },
+      { label: 'Situação', html: (l) => { const s2 = situacao(l, hoje); return s2 === 'pago' ? pill(l.tipo === 'entrada' ? 'Recebido' : 'Pago', 'ok') : s2 === 'vencido' ? pill('Vencido', 'bad') : s2 === 'hoje' ? pill('Vence hoje', 'warn') : pill(l.tipo === 'entrada' ? 'A receber' : 'A pagar', 'info'); } },
       { label: 'Valor', num: true, html: (l) => `<strong class="${l.tipo === 'entrada' ? 'pos' : 'neg'}">${l.tipo === 'saida' ? '– ' : ''}${brl(l.valor)}</strong>` },
       { label: '', cls: 'nowrap right', html: (l) => `${l.status === 'pendente' ? `<button class="btn sm" data-baixa>${l.tipo === 'entrada' ? 'Receber' : 'Pagar'}</button> ` : `<button class="btn sm ghost" data-estorno>Estornar</button> `}<button class="btn sm ghost" data-ed>Editar</button>${l.custo_id || l.venda_id || l.origem_id || (l.categoria === 'Compra de veículos' && l.veiculo_id) ? '' : ' <button class="btn sm danger" data-rm aria-label="Excluir">×</button>'}` },
-    ], rows, { empty: 'Nenhum lançamento nesta lista.' });
+    ], rows, { empty: 'Nenhum lançamento com estes filtros.', foot: rows.length ? [`${rows.length} lançamento(s)`, '', '', '', '', '', `<strong class="${valor(rows) < 0 ? 'neg' : ''}">${brl(valor(rows))}</strong>`, ''] : null });
+    view.querySelectorAll('#cards [data-sit]').forEach((b) => (b.onclick = () => { lf.sit = lf.sit === b.dataset.sit ? '' : b.dataset.sit; load().catch(fail); }));
     view.querySelectorAll('#lst tbody tr').forEach((tr, i) => {
       const l = rows[i];
-      const on = (s, fn) => { const b = tr.querySelector(s); if (b) b.onclick = fn; };
+      const on = (sel, f) => { const b = tr.querySelector(sel); if (b) b.onclick = f; };
       on('[data-baixa]', () => baixa(l, load).catch(fail));
       on('[data-estorno]', async () => { if (await confirmDlg(l.pago_socio_id ? `Voltar este lançamento para pendente? O que foi gerado pelo pagamento de ${l.pago_socio_nome} (${l.pago_socio_modo === 'aporte' ? 'aporte' : 'restituição'}) também é desfeito.` : 'Voltar este lançamento para pendente?', 'Estornar')) { try { await put('/lancamentos/' + l.id, { status: 'pendente' }); load(); } catch (e) { fail(e); } } });
       on('[data-ed]', () => lancForm(l, load));
       on('[data-rm]', async () => { if (await confirmDlg('Excluir este lançamento?', 'Excluir')) { try { await del('/lancamentos/' + l.id); load(); } catch (e) { fail(e); } } });
     });
   };
-  view.querySelectorAll('[data-aba]').forEach((b) => (b.onclick = () => { lf.aba = b.dataset.aba; view.querySelectorAll('[data-aba]').forEach((x) => x.setAttribute('aria-selected', x === b)); load().catch(fail); }));
+  const re = () => load().catch(fail);
+  view.querySelectorAll('[data-tipo]').forEach((b) => (b.onclick = () => { lf.tipo = b.dataset.tipo; re(); }));
+  pbtn.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; pbtn.setAttribute('aria-expanded', String(!menu.hidden)); view.querySelector('#p-custom').hidden = lf.per !== 'custom'; };
+  menu.onclick = (e) => e.stopPropagation();
+  document.addEventListener('click', fecharMenu);
+  view.querySelectorAll('[data-per]').forEach((b) => (b.onclick = () => {
+    const k = b.dataset.per;
+    if (k === 'custom') { const c = view.querySelector('#p-custom'); c.hidden = false; view.querySelector('#p-de').value = lf.de || periodo().de; view.querySelector('#p-ate').value = lf.ate || periodo().ate; return; }
+    Object.assign(lf, k === 'passado' ? { per: 'mes', off: -1 } : k === 'proximo' ? { per: 'mes', off: 1 } : k === 'mes' ? { per: 'mes', off: 0 } : { per: k });
+    fecharMenu(); re();
+  }));
+  view.querySelector('#p-ok').onclick = () => { Object.assign(lf, { per: 'custom', de: view.querySelector('#p-de').value, ate: view.querySelector('#p-ate').value }); fecharMenu(); re(); };
+  view.querySelector('#p-prev').onclick = () => { lf.off--; re(); };
+  view.querySelector('#p-next').onclick = () => { lf.off++; re(); };
+  view.querySelector('#f-tog').onclick = (e) => { lf.filtros = !lf.filtros; view.querySelector('#f-adv').hidden = !lf.filtros; e.currentTarget.setAttribute('aria-expanded', String(lf.filtros)); if (lf.filtros) view.querySelector('#q').focus(); };
   let t;
-  view.querySelector('#q').oninput = (e) => { clearTimeout(t); t = setTimeout(() => { lf.q = e.target.value; load().catch(fail); }, 250); };
-  view.querySelector('#de').onchange = (e) => { lf.de = e.target.value; load().catch(fail); };
-  view.querySelector('#ate').onchange = (e) => { lf.ate = e.target.value; load().catch(fail); };
+  view.querySelector('#q').oninput = (e) => { clearTimeout(t); t = setTimeout(() => { lf.q = e.target.value.trim(); re(); }, 250); };
+  view.querySelector('#f-cat').onchange = (e) => { lf.cat = e.target.value; re(); };
+  view.querySelector('#f-conta').onchange = (e) => { lf.conta = e.target.value; re(); };
+  view.querySelector('#f-forma').onchange = (e) => { lf.forma = e.target.value; re(); };
+  view.querySelector('#f-limpa').onclick = () => { Object.assign(lf, { q: '', cat: '', conta: '', forma: '', sit: '' }); ['#q', '#f-cat', '#f-conta', '#f-forma'].forEach((sel) => { view.querySelector(sel).value = ''; }); re(); };
   view.querySelector('#nent').onclick = () => lancForm({ tipo: 'entrada' }, load);
   view.querySelector('#nsai').onclick = () => lancForm({ tipo: 'saida' }, load);
   await load();

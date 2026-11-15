@@ -235,3 +235,39 @@ table.tbl.dre tr.dre-sub > th:first-child{padding-left:44px;font-weight:400;colo
 .dre-bar.pos{background:var(--ok, #2e9d5b)}
 .dre-bar.neg{background:var(--danger)}
 .dre-col span{font-size:11px;color:var(--muted);margin-top:4px}
+
+/* contas a pagar e receber: barra de filtros, período e cartões */
+.fx-bar{position:relative;z-index:25;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.fx-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fx-drop{position:relative;display:flex}
+.fx-drop>button{min-width:190px;font-weight:700}
+.fx-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:30;background:var(--surface);border:1px solid var(--line-card);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.14);min-width:230px;padding:6px;display:flex;flex-direction:column}
+.fx-menu>button{all:unset;cursor:pointer;padding:10px 12px;border-radius:8px;font-size:14px}
+.fx-menu>button:hover,.fx-menu>button:focus-visible{background:#f5f5f7}
+.fx-custom{display:flex;flex-direction:column;gap:6px;padding:8px 6px 4px;border-top:1px solid var(--line);margin-top:4px}
+.fx-custom label{margin:0}
+.fx-adv{display:flex;gap:10px;align-items:end;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line-card);border-radius:14px;padding:14px;margin-bottom:14px}
+.fx-adv input[type=search]{flex:1 1 260px}
+.fx-adv label{margin:0;flex:0 1 200px}
+.fx-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.fx-card{all:unset;box-sizing:border-box;cursor:pointer;position:relative;display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--line-card);border-radius:16px;padding:16px;min-height:150px;transition:border-color .15s,box-shadow .15s}
+.fx-card:hover{box-shadow:var(--shadow-card, 0 4px 14px rgba(0,0,0,.06))}
+.fx-card:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.fx-card.on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.fx-ico{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;background:#f0f0f2;color:var(--ink);margin-bottom:10px}
+.fx-ico svg{width:20px;height:20px}
+.fx-card.bad .fx-ico{background:var(--danger-soft);color:var(--danger)}
+.fx-card.warn .fx-ico{background:var(--warn-soft);color:var(--warn)}
+.fx-card.info .fx-ico{background:var(--info-soft);color:var(--info)}
+.fx-card.ok .fx-ico{background:var(--ok-soft);color:var(--ok)}
+.fx-ring{position:absolute;top:14px;right:14px;width:46px;height:46px;border-radius:50%;background:conic-gradient(var(--ring, var(--ink)) calc(var(--p)*1%), #ececef 0);display:flex;align-items:center;justify-content:center}
+.fx-ring span{width:36px;height:36px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700}
+.fx-card.bad{--ring:var(--danger)}.fx-card.warn{--ring:var(--warn)}.fx-card.info{--ring:var(--info)}.fx-card.ok{--ring:var(--ok)}
+.fx-k{font-size:13px;font-weight:600;color:var(--muted)}
+.fx-v{font-size:21px;font-weight:800;letter-spacing:-.02em}
+.fx-s{font-size:12px;color:var(--muted)}
+@media (max-width:1100px){.fx-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:640px){.fx-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.fx-drop>button{min-width:0}.fx-bar,.fx-right{width:100%}}
+.fx-custom .btn{background:var(--gold);color:var(--ink);font-weight:700;padding:6px 12px;border-radius:var(--radius-9)}
+.seg.fx-per{overflow:visible}
+@media (max-width:640px){.fx-adv label{flex:1 1 100%}.fx-adv select{width:100%}}
