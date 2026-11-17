@@ -44,9 +44,19 @@ function footer(doc, text) {
 }
 
 // texto com **negrito** inline
+// O PDFKit descarta o espaço do começo de cada trecho "continued"; por isso o espaço que vem depois
+// de um negrito é levado para o fim do trecho anterior (senão sai "VENDEDORAentregará").
 function richParagraph(doc, text, opts = {}) {
   const parts = String(text).split(/(\*\*[^*]+\*\*)/g).filter((p) => p !== '');
   if (!parts.length) return;
+  for (let i = 1; i < parts.length; i++) {
+    const m = parts[i].match(/^\s+/);
+    if (!m) continue;
+    const bold = /^\*\*[^*]+\*\*$/.test(parts[i - 1]);
+    parts[i - 1] = bold ? `**${parts[i - 1].slice(2, -2)}${m[0]}**` : parts[i - 1] + m[0];
+    parts[i] = parts[i].slice(m[0].length);
+  }
+  for (let i = parts.length - 1; i >= 0; i--) if (parts[i] === '' || parts[i] === '****') parts.splice(i, 1);
   parts.forEach((p, i) => {
     const bold = /^\*\*[^*]+\*\*$/.test(p);
     doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').text(bold ? p.slice(2, -2) : p, { ...opts, continued: i < parts.length - 1 });
@@ -99,9 +109,10 @@ function signatureBlock(doc, kind, d, ctx) {
 
 async function documentoPDF(d, ctx) {
   const s = getSettings();
-  const doc = new PDFDocument({ size: 'A4', margins: { top: 40, left: 56, right: 56, bottom: 64 }, bufferPages: true, info: { Title: d.titulo, Author: s.empresa_nome } });
-  doc.on('pageAdded', () => header(doc, s));
-  header(doc, s);
+  // o cabeçalho é desenhado no fim, em todas as páginas (como o rodapé). Desenhá-lo no evento de página nova
+  // no meio de um parágrafo com negrito embaralhava o texto e cortava o cabeçalho (o texto "encavalava").
+  // A margem de cima já reserva o espaço do cabeçalho (logo + linha dourada).
+  const doc = new PDFDocument({ size: 'A4', margins: { top: 110, left: 56, right: 56, bottom: 64 }, bufferPages: true, info: { Title: d.titulo, Author: s.empresa_nome } });
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const blocks = String(d.conteudo).replace(/\r/g, '').split(/\n\s*\n/);
   for (const raw of blocks) {
@@ -133,6 +144,8 @@ async function documentoPDF(d, ctx) {
   if (d.assinado_em) {
     foot = `Assinado eletronicamente por ${d.assinatura_nome} (CPF/CNPJ ${d.assinatura_doc}) em ${d.assinado_em} · IP ${d.assinatura_ip} · Hash SHA-256 do conteúdo: ${d.assinatura_hash}`;
   }
+  const pages = doc.bufferedPageRange();
+  for (let i = pages.start; i < pages.start + pages.count; i++) { doc.switchToPage(i); header(doc, s); }
   footer(doc, foot);
   return toBuffer(doc);
 }
