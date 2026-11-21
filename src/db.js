@@ -242,6 +242,8 @@ const DEFAULT_SETTINGS = {
   garantia_padrao_dias: '90',
   foro: '',
   fipe_token: '',
+  openai_api_key: '',
+  openai_modelo: '',
 };
 const insSetting = db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)');
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insSetting.run(k, v);

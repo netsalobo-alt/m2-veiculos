@@ -1,4 +1,4 @@
-import { get, post, put, del, esc, brl, dt, today, monthStart, monthEnd, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, pill, icon, FORMAS, MESES, can, moneyInput } from '../core.js';
+import { api, get, post, put, del, esc, brl, dt, today, monthStart, monthEnd, modal, confirmDlg, toast, fail, field, moneyField, selectField, areaField, table, pill, icon, FORMAS, MESES, can, moneyInput } from '../core.js';
 import { setCrumbs } from '../main.js';
 
 let mesOff = 0;
@@ -207,7 +207,7 @@ export async function lancamentos(view, { params }) {
   const TIPOS = [['saida', 'A pagar'], ['entrada', 'A receber'], ['todos', 'Todos']];
   const PERS = [['hoje', 'Hoje'], ['semana', 'Esta semana'], ['passado', 'Mês passado'], ['mes', 'Este mês'], ['proximo', 'Próximo mês'], ['todo', 'Todo o período'], ['custom', 'Escolha o período']];
   view.innerHTML = `<div class="ph"><div><p class="eyebrow">FINANCEIRO</p><h1>Contas a pagar e receber</h1><p>Baixe pagamentos e recebimentos e acompanhe os vencimentos.</p></div>
-    <div class="acts"><a class="btn ghost" href="#/contas-fixas">Contas fixas</a><button class="btn ghost" id="nsai">${icon('plus')}Nova saída</button><button class="btn" id="nent">${icon('plus')}Nova entrada</button></div></div>
+    <div class="acts"><a class="btn ghost" href="#/contas-fixas">Contas fixas</a>${can('custos') ? `<label class="btn ghost" style="margin:0;cursor:pointer" title="Foto ou PDF de recibo, nota, boleto ou conta: a IA lê e sugere onde lançar">${icon('doc')}Ler recibo<input type="file" id="lerrec" hidden accept="image/jpeg,image/png,image/webp,application/pdf,image/*"></label>` : ''}<button class="btn ghost" id="nsai">${icon('plus')}Nova saída</button><button class="btn" id="nent">${icon('plus')}Nova entrada</button></div></div>
     <div class="fx-bar">
       <div class="seg" role="group" aria-label="Tipo">${TIPOS.map(([k, l]) => `<button type="button" data-tipo="${k}" aria-pressed="${lf.tipo === k}">${l}</button>`).join('')}</div>
       <div class="fx-right">
@@ -305,5 +305,82 @@ export async function lancamentos(view, { params }) {
   view.querySelector('#f-limpa').onclick = () => { Object.assign(lf, { q: '', cat: '', conta: '', forma: '', sit: '' }); ['#q', '#f-cat', '#f-conta', '#f-forma'].forEach((sel) => { view.querySelector(sel).value = ''; }); re(); };
   view.querySelector('#nent').onclick = () => lancForm({ tipo: 'entrada' }, load);
   view.querySelector('#nsai').onclick = () => lancForm({ tipo: 'saida' }, load);
+  const lr = view.querySelector('#lerrec');
+  if (lr) lr.onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) lerReciboFinanceiro(f, contas, load).catch(fail); };
   await load();
+}
+
+// ------------------------------------------------------------------ ler recibo/conta e decidir onde lançar
+// A IA lê o documento e sugere: custo de um carro (pela placa ou descrição) ou despesa da loja. O usuário confere e salva.
+async function lerReciboFinanceiro(file, contas, onSaved) {
+  const espera = modal({ title: 'Lendo o documento…', body: `<p style="margin:0">A IA está lendo <strong>${esc(file.name)}</strong> e procurando o veículo. Isso leva alguns segundos.</p><div class="meter" style="margin-top:14px"><i class="lendo" style="width:40%"></i></div>` });
+  let r, veiculos;
+  try {
+    const fd = new FormData(); fd.append('arquivo', file);
+    [r, veiculos] = await Promise.all([api('/recibo/ler?estoque=1', { method: 'POST', body: fd }), get('/veiculos')]);
+  } finally { espera.close(); }
+  const vlist = veiculos.sort((a, b) => (a.status === 'vendido') - (b.status === 'vendido') || b.id - a.id);
+  const vdescr = (v) => `${[v.marca, v.modelo, v.versao].filter(Boolean).join(' ')}${v.placa ? ' · ' + v.placa : ''}${v.status === 'vendido' ? ' (vendido)' : ''}`;
+  const tipo0 = r.tipo === 'custo_veiculo' ? 'custo' : 'despesa';
+  const padraoConta = (contas.find((c) => c.tipo === 'banco') || contas[0] || {}).id;
+  const motivo = r.veiculo ? (r.veiculo_motivo === 'placa' ? `Encontrado pela placa <strong>${esc(r.placa)}</strong> lida no documento.` : 'Identificado pela descrição do documento. Confira se é o carro certo.')
+    : r.placa_nao_encontrada ? `A placa <strong>${esc(r.placa)}</strong> lida no documento não está no estoque. Escolha o carro.` : 'Não foi possível identificar o carro. Escolha na lista.';
+  modal({
+    title: 'Conferir lançamento do documento', size: 'wide', submitLabel: 'Lançar',
+    body: `<div class="alert ${r.confianca === 'alta' ? 'info' : ''}" style="margin-bottom:14px">Lido pela IA${r.confianca ? ` (confiança ${r.confianca === 'media' ? 'média' : esc(r.confianca)})` : ''}. <strong>Confira antes de lançar.</strong>${r.observacao ? ' ' + esc(r.observacao) : ''}${r.e_recibo === false ? ' O arquivo não parece ser um recibo ou conta.' : ''}</div>
+      <fieldset class="seg-tipo" style="border:0;padding:0;margin:0 0 12px;display:flex;gap:18px;flex-wrap:wrap">
+        <legend style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Onde lançar</legend>
+        <label class="check"><input type="radio" name="destino" value="custo" ${tipo0 === 'custo' ? 'checked' : ''}> <strong>Custo de um veículo</strong></label>
+        <label class="check"><input type="radio" name="destino" value="despesa" ${tipo0 === 'despesa' ? 'checked' : ''}> <strong>Despesa da loja</strong> (luz, aluguel, internet…)</label>
+      </fieldset>
+      <div class="form-grid">
+        <div class="c12" id="rc-custo">
+          <div class="form-grid">
+            <label class="c8">Veículo<select name="veiculo_id"><option value="">Escolha o veículo…</option>${vlist.map((v) => `<option value="${v.id}" ${r.veiculo && r.veiculo.id === v.id ? 'selected' : ''}>${esc(vdescr(v))}</option>`).join('')}</select></label>
+            ${selectField('Categoria do custo', 'categoria_custo', r.listas.custo, r.categoria, { cls: 'c4' })}
+            <p class="hint c12" style="margin-top:-6px">${motivo}</p>
+          </div></div>
+        <div class="c12" id="rc-despesa">
+          <div class="form-grid">${selectField('Categoria da despesa', 'categoria_despesa', r.listas.despesa, r.categoria_despesa, { cls: 'c6' })}</div></div>
+        ${field('Descrição', 'descricao', r.descricao, { cls: 'c8', attrs: 'required maxlength="200"' })}
+        ${field('Fornecedor', 'fornecedor', r.fornecedor, { cls: 'c4' })}
+        ${moneyField('Valor', 'valor', r.valor_total, { cls: 'c4', attrs: 'required' })}
+        ${field('Data do documento', 'data', r.data || today(), { type: 'date', cls: 'c4' })}
+        ${selectField('Situação', 'situacao', { pago: 'Já pago', pendente: 'A pagar' }, r.ja_pago ? 'pago' : 'pendente', { cls: 'c4' })}
+        <div class="c12" id="rc-venc">${field('Vencimento', 'vencimento', r.vencimento || r.data || today(), { type: 'date' })}</div>
+        <div class="c12" id="rc-conta"><div class="form-grid">${selectField('Conta', 'conta_id', contas.map((c) => [c.id, c.nome]), padraoConta, { cls: 'c6' })}${selectField('Forma', 'forma', { '': '—', ...FORMAS }, /pix/i.test(r.forma_pagamento || '') ? 'pix' : /dinheiro/i.test(r.forma_pagamento || '') ? 'dinheiro' : /boleto/i.test(r.forma_pagamento || '') ? 'boleto' : /cr[eé]dito/i.test(r.forma_pagamento || '') ? 'cartao_credito' : /d[eé]bito/i.test(r.forma_pagamento || '') ? 'cartao_debito' : '', { cls: 'c6' })}</div></div>
+        <label class="check c12" id="rc-anexo"><input type="checkbox" name="guardar_recibo" checked> Guardar o documento (${esc(file.name)}) nos documentos anexados do veículo</label>
+      </div>`,
+    onOpen: (d) => {
+      const sync = () => {
+        const custo = d.querySelector('[name=destino]:checked').value === 'custo';
+        const pendente = d.querySelector('[name=situacao]').value === 'pendente';
+        d.querySelector('#rc-custo').hidden = !custo; d.querySelector('#rc-anexo').hidden = !custo;
+        d.querySelector('#rc-despesa').hidden = custo;
+        d.querySelector('#rc-venc').hidden = !pendente || custo;
+        d.querySelector('#rc-conta').hidden = custo;
+      };
+      d.querySelectorAll('[name=destino],[name=situacao]').forEach((x) => x.addEventListener('change', sync)); sync();
+    },
+    onSubmit: async (f) => {
+      if (!(Number(f.valor) > 0)) throw new Error('Informe o valor.');
+      if (f.destino === 'custo') {
+        if (!f.veiculo_id) throw new Error('Escolha o veículo que recebe o custo.');
+        await post(`/veiculos/${f.veiculo_id}/custos`, { data: f.data, categoria: f.categoria_custo, valor: f.valor, descricao: f.descricao, fornecedor: f.fornecedor, pago: f.situacao === 'pago' ? 1 : 0 });
+        if (f.guardar_recibo) {
+          const fd = new FormData();
+          fd.append('descricoes', `Recibo: ${f.descricao}${f.fornecedor ? ' – ' + f.fornecedor : ''}`.slice(0, 500));
+          fd.append('arquivos', file);
+          try { await api(`/veiculos/${f.veiculo_id}/anexos`, { method: 'POST', body: fd }); } catch (e) { toast('Custo lançado, mas o documento não foi anexado: ' + e.message, true); onSaved && onSaved(); return; }
+        }
+        const v = vlist.find((x) => String(x.id) === String(f.veiculo_id));
+        toast(`Custo lançado em ${v ? [v.marca, v.modelo].filter(Boolean).join(' ') : 'veículo'}${f.guardar_recibo ? ' e documento anexado' : ''}.`);
+      } else {
+        const pago = f.situacao === 'pago';
+        await post('/lancamentos', { tipo: 'saida', descricao: f.descricao, categoria: f.categoria_despesa, valor: f.valor, vencimento: pago ? f.data : f.vencimento || f.data, status: pago ? 'pago' : 'pendente', data_pagamento: pago ? f.data : null, conta_id: f.conta_id, forma: f.forma || null, observacoes: f.fornecedor ? `Fornecedor: ${f.fornecedor}` : null });
+        toast(pago ? 'Despesa lançada como paga.' : 'Despesa lançada em contas a pagar.');
+      }
+      onSaved && onSaved();
+    },
+  });
 }
