@@ -136,3 +136,78 @@ export async function detalhe(id, onChange) {
   m.el.addEventListener('close', () => clearTimeout(t));
   desenhar(); agenda();
 }
+
+// ------------------------------------------------------------------ operações fiscais (na Notavia, gerenciadas por aqui)
+const FINALIDADE = { 1: 'Normal', 2: 'Complementar', 3: 'Ajuste', 4: 'Devolução' };
+// modelos comuns em revenda de veículos: CFOPs para o contador conferir
+const MODELOS = [
+  { codigo: 'Venda', descricao: 'Venda de veículo usado', tipoOperacao: 1, finalidade: 1, consumidorFinal: true, cfopDentroEstado: '5102', cfopForaEstado: '6102', dica: 'Venda de mercadoria adquirida de terceiros.' },
+  { codigo: 'Demonstracao', descricao: 'Remessa para demonstração', tipoOperacao: 1, finalidade: 1, consumidorFinal: true, cfopDentroEstado: '5912', cfopForaEstado: '6912', dica: 'Saída do veículo para test-drive ou demonstração.' },
+  { codigo: 'RetornoDemonstracao', descricao: 'Retorno de demonstração', tipoOperacao: 0, finalidade: 1, consumidorFinal: false, cfopDentroEstado: '1913', cfopForaEstado: '2913', dica: 'Volta do veículo que saiu em demonstração.' },
+  { codigo: 'CompraPF', descricao: 'Entrada de veículo usado comprado', tipoOperacao: 0, finalidade: 1, consumidorFinal: false, cfopDentroEstado: '1102', cfopForaEstado: '2102', dica: 'Compra de veículo de pessoa física (NF-e de entrada emitida pela loja).' },
+  { codigo: 'DevolucaoVenda', descricao: 'Devolução de venda', tipoOperacao: 0, finalidade: 4, consumidorFinal: false, cfopDentroEstado: '1202', cfopForaEstado: '2202', dica: 'Cliente devolve o veículo vendido.' },
+];
+
+export async function operacoes(view) {
+  setCrumbs('Fiscal', 'Operações fiscais');
+  view.innerHTML = `<div class="ph"><div><p class="eyebrow">FISCAL</p><h1>Operações fiscais</h1><p>Natureza da operação e CFOPs usados nas NF-e. Ficam guardadas na Notavia e são gerenciadas por aqui. Os impostos de cada operação são definidos na matriz de impostos, no portal da Notavia.</p></div>
+    <div class="acts">${can('config') ? `<button class="btn ghost" id="modelos">Modelos prontos</button><button class="btn" id="nova">${icon('plus')}Nova operação</button>` : ''}</div></div>
+    <div id="ops"><div class="empty">Carregando da Notavia…</div></div>
+    <p class="hint" style="margin-top:12px">Para excluir uma operação, use o portal da Notavia (a API não permite excluir). Confira os CFOPs com o contador antes de emitir em produção.</p>`;
+  const load = async () => {
+    const r = await get('/fiscal/operacoes');
+    const ops = r.operacoes;
+    view.querySelector('#ops').innerHTML = table([
+      { label: 'Código', html: (o) => `<strong>${esc(o.codigo)}</strong>${o.codigo === r.op_venda ? ' <span class="pill ok">Usada na venda</span>' : ''}` },
+      { label: 'Natureza da operação', html: (o) => esc(o.descricao) },
+      { label: 'Tipo', html: (o) => (o.tipoOperacao === 0 ? pill('Entrada', 'info') : pill('Saída', '')) },
+      { label: 'Finalidade', html: (o) => esc(FINALIDADE[o.finalidade] || o.finalidade) },
+      { label: 'Consumidor final', html: (o) => (o.consumidorFinal ? 'Sim' : 'Não') },
+      { label: 'CFOP no estado', html: (o) => `<span style="font-family:monospace">${esc(String(o.cfopDentroEstado || ''))}</span>` },
+      { label: 'CFOP fora do estado', html: (o) => `<span style="font-family:monospace">${esc(String(o.cfopForaEstado || ''))}</span>` },
+      { label: '', cls: 'nowrap right', html: (o) => (can('config') ? `${o.codigo !== r.op_venda && o.tipoOperacao === 1 ? `<button class="btn sm ghost" data-venda="${esc(o.codigo)}">Usar na venda</button> ` : ''}<button class="btn sm ghost" data-ed="${esc(o.codigo)}">Editar</button>` : '') },
+    ], ops, { empty: 'Nenhuma operação na Notavia. Use "Modelos prontos" para criar as mais comuns.' });
+    view.querySelectorAll('[data-ed]').forEach((b) => (b.onclick = () => form(ops.find((o) => o.codigo === b.dataset.ed), false, load)));
+    view.querySelectorAll('[data-venda]').forEach((b) => (b.onclick = async () => { try { await api('/fiscal/operacao-venda', { method: 'PUT', body: { codigo: b.dataset.venda } }); toast(`A NF-e de venda passa a usar "${b.dataset.venda}".`); load(); } catch (e) { fail(e); } }));
+    const mb = view.querySelector('#modelos'); if (mb) mb.onclick = () => modelos(ops, load);
+  };
+  const nb = view.querySelector('#nova'); if (nb) nb.onclick = () => form(null, true, load);
+  try { await load(); } catch (e) { view.querySelector('#ops').innerHTML = `<div class="alert">${esc(e.message)}</div>`; }
+}
+
+function form(o, novo, onSaved) {
+  const v = o || { tipoOperacao: 1, finalidade: 1, consumidorFinal: true };
+  modal({
+    title: novo ? 'Nova operação fiscal' : `Editar operação "${o.codigo}"`, size: 'wide', submitLabel: 'Salvar na Notavia',
+    body: `<div class="form-grid">
+      <label class="c4">Código<input name="codigo" value="${esc(v.codigo || '')}" ${novo ? '' : 'readonly'} required maxlength="40" placeholder="Ex.: Venda"></label>
+      <label class="c8">Natureza da operação (descrição)<input name="descricao" value="${esc(v.descricao || '')}" required maxlength="120" placeholder="Ex.: Venda de veículo usado"></label>
+      <label class="c4">Tipo<select name="tipoOperacao"><option value="1" ${v.tipoOperacao !== 0 ? 'selected' : ''}>Saída</option><option value="0" ${v.tipoOperacao === 0 ? 'selected' : ''}>Entrada</option></select></label>
+      <label class="c4">Finalidade<select name="finalidade">${Object.entries(FINALIDADE).map(([k, l]) => `<option value="${k}" ${String(v.finalidade) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="c4">Consumidor final<select name="consumidorFinal"><option value="1" ${v.consumidorFinal ? 'selected' : ''}>Sim</option><option value="0" ${!v.consumidorFinal ? 'selected' : ''}>Não</option></select></label>
+      <label class="c4">CFOP dentro do estado<input name="cfopDentroEstado" value="${esc(String(v.cfopDentroEstado || ''))}" required inputmode="numeric" maxlength="5" placeholder="5102"></label>
+      <label class="c4">CFOP fora do estado<input name="cfopForaEstado" value="${esc(String(v.cfopForaEstado || ''))}" required inputmode="numeric" maxlength="5" placeholder="6102"></label>
+      <label class="check c12"><input type="checkbox" name="usar_na_venda"> Usar esta operação na NF-e de venda</label>
+      <p class="hint c12">Saída usa CFOP começando com 5 (no estado) ou 6 (fora); entrada com 1 ou 2. O CFOP de cada nota é escolhido pela UF do destinatário.${novo ? '' : ' Alterar uma operação vale para as próximas notas.'}</p></div>`,
+    onSubmit: async (d) => {
+      const codigo = String(d.codigo || '').trim();
+      await api(`/fiscal/operacoes/${encodeURIComponent(codigo)}`, { method: 'PUT', body: d });
+      toast(`Operação "${codigo}" salva na Notavia.`); onSaved && onSaved();
+    },
+  });
+}
+
+function modelos(existentes, onSaved) {
+  const tem = new Set(existentes.map((o) => o.codigo));
+  modal({
+    title: 'Modelos de operação para revenda de veículos', size: 'wide', submitLabel: 'Criar selecionadas',
+    body: `<p class="muted" style="margin-top:0">Marque as operações que quer criar na Notavia. <strong>Confira os CFOPs com o contador</strong> (alguns usam outros CFOPs quando há substituição tributária).</p>
+      ${MODELOS.map((m, i) => `<label class="check" style="align-items:flex-start;margin-bottom:10px"><input type="checkbox" name="m${i}" ${tem.has(m.codigo) ? 'disabled' : ''}> <span><strong>${esc(m.descricao)}</strong> <span class="muted">(${esc(m.codigo)} · ${m.tipoOperacao === 0 ? 'entrada' : 'saída'} · CFOP ${m.cfopDentroEstado}/${m.cfopForaEstado})</span>${tem.has(m.codigo) ? ' <span class="pill ok">já existe</span>' : ''}<br><span class="small muted">${esc(m.dica)}</span></span></label>`).join('')}`,
+    onSubmit: async (d) => {
+      const sel = MODELOS.filter((m, i) => d['m' + i] && !tem.has(m.codigo));
+      if (!sel.length) throw new Error('Marque ao menos uma operação.');
+      for (const m of sel) await api(`/fiscal/operacoes/${encodeURIComponent(m.codigo)}`, { method: 'PUT', body: { ...m, consumidorFinal: m.consumidorFinal ? 1 : 0 } });
+      toast(`${sel.length} operação(ões) criada(s) na Notavia.`); onSaved && onSaved();
+    },
+  });
+}

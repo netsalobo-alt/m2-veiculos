@@ -21,6 +21,7 @@ const NAV = [
   { href: '#/relatorios', label: 'Relatórios', icon: 'chart', perm: 'relatorios', page: 'relatorios' },
   { grp: 'Fiscal' },
   { href: '#/fiscal', label: 'NF-e', icon: 'doc', perm: 'fiscal', page: 'fiscal' },
+  { href: '#/fiscal/operacoes', label: 'Operações fiscais', icon: 'list', perm: 'fiscal', page: 'fiscalops' },
   { grp: 'Administração' },
   { href: '#/usuarios', label: 'Usuários', icon: 'user', perm: 'usuarios', page: 'usuarios' },
   { href: '#/site', label: 'Editar site', icon: 'globe', perm: 'config', page: 'site' },
@@ -48,6 +49,7 @@ const ROUTES = [
   [/^\/contas-fixas$/, 'contasfixas', 'render'],
   [/^\/dre$/, 'dre', 'render'],
   [/^\/fiscal$/, 'fiscal', 'list'],
+  [/^\/fiscal\/operacoes$/, 'fiscal', 'operacoes'],
   [/^\/funcionarios$/, 'funcionarios', 'list'],
   [/^\/funcionario\/(\d+)$/, 'funcionarios', 'detail'],
   [/^\/relatorios$/, 'relatorios', 'render'],
@@ -101,7 +103,7 @@ async function route() {
     const m = path.match(re);
     if (!m) continue;
     document.querySelectorAll('.side a[data-page]').forEach((a) => a.toggleAttribute('aria-current', false));
-    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', site: 'site', socios: 'socios', relatorios: 'relatorios', dashboard: 'dashboard', contasfixas: 'contasfixas', funcionarios: 'funcionarios', dre: 'dre', fiscal: 'fiscal' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
+    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', site: 'site', socios: 'socios', relatorios: 'relatorios', dashboard: 'dashboard', contasfixas: 'contasfixas', funcionarios: 'funcionarios', dre: 'dre', fiscal: fn === 'operacoes' ? 'fiscalops' : 'fiscal' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
     const a = document.querySelector(`.side a[data-page="${navPage}"]`);
     if (a) a.setAttribute('aria-current', 'page');
     view.innerHTML = '<div class="empty">Carregando…</div>';

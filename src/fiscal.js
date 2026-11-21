@@ -234,6 +234,46 @@ function rotas(api, can) {
       fs.createReadStream(f).pipe(res);
     } catch (e) { next(e); }
   };
+  // operações fiscais (ficam na Notavia; a API permite listar, criar e editar — excluir só no portal)
+  api.get('/fiscal/operacoes', can('fiscal'), async (req, res, next) => {
+    try {
+      const todas = [];
+      for (let pagina = 1; pagina <= 20; pagina++) {
+        const r = await notavia('GET', `/operacoes-fiscais?pagina=${pagina}&tamanho=100`);
+        const itens = (r && (r.items || r.itens)) || (Array.isArray(r) ? r : []);
+        todas.push(...itens);
+        if (!r || !r.total || todas.length >= r.total || !itens.length) break;
+      }
+      res.json({ operacoes: todas.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))), op_venda: cfg().opVenda });
+    } catch (e) { next(e); }
+  });
+  api.put('/fiscal/operacoes/:codigo', can('config'), async (req, res, next) => {
+    try {
+      const b = req.body || {};
+      const codigo = String(req.params.codigo || '').trim();
+      const cfop = (v) => so(v);
+      const d = {
+        codigo, descricao: String(b.descricao || '').trim().slice(0, 120),
+        tipoOperacao: Number(b.tipoOperacao) === 0 ? 0 : 1, finalidade: [1, 2, 3, 4].includes(Number(b.finalidade)) ? Number(b.finalidade) : 1,
+        consumidorFinal: !!Number(b.consumidorFinal), cfopDentroEstado: cfop(b.cfopDentroEstado), cfopForaEstado: cfop(b.cfopForaEstado),
+      };
+      if (!/^[A-Za-z0-9_\-.]{1,40}$/.test(codigo)) throw bad('Código inválido: use letras, números, ponto, hífen ou sublinhado (até 40), sem espaços.');
+      if (!d.descricao) throw bad('Informe a descrição (natureza da operação).');
+      for (const [k, nome] of [['cfopDentroEstado', 'dentro do estado'], ['cfopForaEstado', 'fora do estado']]) if (!/^\d{4}$/.test(d[k])) throw bad(`CFOP ${nome} precisa ter 4 dígitos.`);
+      // CFOP de entrada começa com 1/2/3; de saída com 5/6/7
+      const ok = d.tipoOperacao === 0 ? /^[123]/ : /^[567]/;
+      if (!ok.test(d.cfopDentroEstado) || !ok.test(d.cfopForaEstado)) throw bad(d.tipoOperacao === 0 ? 'Operação de entrada usa CFOP começando com 1, 2 ou 3.' : 'Operação de saída usa CFOP começando com 5, 6 ou 7.');
+      const r = await notavia('PUT', `/operacoes-fiscais/${encodeURIComponent(codigo)}`, d);
+      if (Number(b.usar_na_venda)) db.prepare("INSERT INTO settings(key,value) VALUES ('notavia_op_venda',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(codigo);
+      res.json(r || d);
+    } catch (e) { next(e); }
+  });
+  api.put('/fiscal/operacao-venda', can('config'), (req, res) => {
+    const codigo = String((req.body || {}).codigo || '').trim();
+    if (!codigo) throw bad('Escolha a operação.');
+    db.prepare("INSERT INTO settings(key,value) VALUES ('notavia_op_venda',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(codigo);
+    res.json({ ok: true });
+  });
   api.get('/fiscal/notas/:id/xml', can('fiscal'), arquivo('xml'));
   api.get('/fiscal/notas/:id/danfe', can('fiscal'), arquivo('danfe'));
 }
