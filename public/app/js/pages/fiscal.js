@@ -142,6 +142,7 @@ const FINALIDADE = { 1: 'Normal', 2: 'Complementar', 3: 'Ajuste', 4: 'Devoluçã
 // modelos comuns em revenda de veículos: CFOPs para o contador conferir
 const MODELOS = [
   { codigo: 'Venda', descricao: 'Venda de veículo usado', tipoOperacao: 1, finalidade: 1, consumidorFinal: true, cfopDentroEstado: '5102', cfopForaEstado: '6102', dica: 'Venda de mercadoria adquirida de terceiros.' },
+  { codigo: 'VendaMercadoria', descricao: 'Venda de mercadoria', tipoOperacao: 1, finalidade: 1, consumidorFinal: true, cfopDentroEstado: '5102', cfopForaEstado: '6102', dica: 'Venda de produto novo, como as bikes elétricas.' },
   { codigo: 'Demonstracao', descricao: 'Remessa para demonstração', tipoOperacao: 1, finalidade: 1, consumidorFinal: true, cfopDentroEstado: '5912', cfopForaEstado: '6912', dica: 'Saída do veículo para test-drive ou demonstração.' },
   { codigo: 'RetornoDemonstracao', descricao: 'Retorno de demonstração', tipoOperacao: 0, finalidade: 1, consumidorFinal: false, cfopDentroEstado: '1913', cfopForaEstado: '2913', dica: 'Volta do veículo que saiu em demonstração.' },
   { codigo: 'CompraPF', descricao: 'Entrada de veículo usado comprado', tipoOperacao: 0, finalidade: 1, consumidorFinal: false, cfopDentroEstado: '1102', cfopForaEstado: '2102', dica: 'Compra de veículo de pessoa física (NF-e de entrada emitida pela loja).' },
@@ -157,18 +158,33 @@ export async function operacoes(view) {
   const load = async () => {
     const r = await get('/fiscal/operacoes');
     const ops = r.operacoes;
+    const NOMES = { carro: 'carro', moto: 'moto', bike: 'bike' };
+    const efetiva = (t) => (r.op_tipo && r.op_tipo[t]) || r.op_venda;
+    const usos = (cod) => ['carro', 'moto', 'bike'].filter((t) => efetiva(t) === cod).map((t) => NOMES[t]);
     view.querySelector('#ops').innerHTML = table([
-      { label: 'Código', html: (o) => `<strong>${esc(o.codigo)}</strong>${o.codigo === r.op_venda ? ' <span class="pill ok">Usada na venda</span>' : ''}` },
+      { label: 'Código', html: (o) => `<strong>${esc(o.codigo)}</strong>${usos(o.codigo).length ? `<div style="margin-top:4px">${usos(o.codigo).map((t) => `<span class="pill ok">Venda: ${t}</span>`).join(' ')}</div>` : ''}` },
       { label: 'Natureza da operação', html: (o) => esc(o.descricao) },
       { label: 'Tipo', html: (o) => (o.tipoOperacao === 0 ? pill('Entrada', 'info') : pill('Saída', '')) },
       { label: 'Finalidade', html: (o) => esc(FINALIDADE[o.finalidade] || o.finalidade) },
       { label: 'Consumidor final', html: (o) => (o.consumidorFinal ? 'Sim' : 'Não') },
       { label: 'CFOP no estado', html: (o) => `<span style="font-family:monospace">${esc(String(o.cfopDentroEstado || ''))}</span>` },
       { label: 'CFOP fora do estado', html: (o) => `<span style="font-family:monospace">${esc(String(o.cfopForaEstado || ''))}</span>` },
-      { label: '', cls: 'nowrap right', html: (o) => (can('config') ? `${o.codigo !== r.op_venda && o.tipoOperacao === 1 ? `<button class="btn sm ghost" data-venda="${esc(o.codigo)}">Usar na venda</button> ` : ''}<button class="btn sm ghost" data-ed="${esc(o.codigo)}">Editar</button>` : '') },
+      { label: '', cls: 'nowrap right', html: (o) => (can('config') ? `${o.tipoOperacao === 1 ? `<button class="btn sm ghost" data-venda="${esc(o.codigo)}">Usar na venda…</button> ` : ''}<button class="btn sm ghost" data-ed="${esc(o.codigo)}">Editar</button>` : '') },
     ], ops, { empty: 'Nenhuma operação na Notavia. Use "Modelos prontos" para criar as mais comuns.' });
     view.querySelectorAll('[data-ed]').forEach((b) => (b.onclick = () => form(ops.find((o) => o.codigo === b.dataset.ed), false, load)));
-    view.querySelectorAll('[data-venda]').forEach((b) => (b.onclick = async () => { try { await api('/fiscal/operacao-venda', { method: 'PUT', body: { codigo: b.dataset.venda } }); toast(`A NF-e de venda passa a usar "${b.dataset.venda}".`); load(); } catch (e) { fail(e); } }));
+    view.querySelectorAll('[data-venda]').forEach((b) => (b.onclick = () => {
+      const cod = b.dataset.venda;
+      modal({
+        title: `Usar "${cod}" na venda de…`, submitLabel: 'Salvar',
+        body: `<p class="muted" style="margin-top:0">Marque os tipos de veículo que usam esta operação na NF-e de venda.</p>
+          ${['carro', 'moto', 'bike'].map((t) => `<label class="check"><input type="checkbox" name="t_${t}" ${efetiva(t) === cod ? 'checked' : ''}> ${({ carro: 'Carro', moto: 'Moto', bike: 'Bike elétrica' })[t]}${efetiva(t) && efetiva(t) !== cod ? ` <span class="muted small">(hoje: ${esc(efetiva(t))})</span>` : ''}</label>`).join('')}`,
+        onSubmit: async (f) => {
+          const tipos = ['carro', 'moto', 'bike'].filter((t) => f['t_' + t]);
+          await api('/fiscal/operacao-venda', { method: 'PUT', body: { codigo: cod, tipos } });
+          toast('Operação de venda por tipo salva.'); load();
+        },
+      });
+    }));
     const mb = view.querySelector('#modelos'); if (mb) mb.onclick = () => modelos(ops, load);
   };
   const nb = view.querySelector('#nova'); if (nb) nb.onclick = () => form(null, true, load);

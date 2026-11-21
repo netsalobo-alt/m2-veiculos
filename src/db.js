@@ -216,6 +216,8 @@ CREATE INDEX IF NOT EXISTS ix_nf_status ON notas_fiscais(status);`);
   if (!cp.includes('inscricao_estadual')) db.exec('ALTER TABLE pessoas ADD COLUMN inscricao_estadual TEXT');
   const cv = db.prepare('PRAGMA table_info(veiculos)').all().map((c) => c.name);
   if (!cv.includes('ncm')) db.exec('ALTER TABLE veiculos ADD COLUMN ncm TEXT');
+  // condição para a NF-e: 'novo' ou 'usado'; vazio = padrão do tipo (bike elétrica: novo; carro e moto: usado)
+  if (!cv.includes('condicao')) db.exec('ALTER TABLE veiculos ADD COLUMN condicao TEXT');
 }
 // funcionários da loja (salários são lançados no financeiro ligados a eles)
 db.exec(`CREATE TABLE IF NOT EXISTS funcionarios (
@@ -270,7 +272,7 @@ const DEFAULT_SETTINGS = {
   fipe_token: '',
   openai_api_key: '',
   notavia_api_key: '', notavia_url: 'https://app.notavia.com.br', notavia_ambiente: 'homologacao', notavia_cnpj: '', notavia_serie: '',
-  notavia_op_venda: '', notavia_ncm_carro: '', notavia_ncm_moto: '', notavia_ncm_bike: '', notavia_cest_carro: '', notavia_cest_moto: '', notavia_cest_bike: '',
+  notavia_op_venda: '', notavia_op_venda_carro: '', notavia_op_venda_moto: '', notavia_op_venda_bike: '', notavia_ncm_carro: '', notavia_ncm_moto: '', notavia_ncm_bike: '', notavia_cest_carro: '', notavia_cest_moto: '', notavia_cest_bike: '',
   openai_modelo: '',
 };
 const insSetting = db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)');

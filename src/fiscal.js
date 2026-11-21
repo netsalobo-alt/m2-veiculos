@@ -23,6 +23,8 @@ function cfg() {
     cnpj: so(s.notavia_cnpj || s.cnpj),
     serie: s.notavia_serie ? Number(s.notavia_serie) : null,
     opVenda: (s.notavia_op_venda || '').trim(),
+    // operação de venda por tipo de veículo (vazio = a operação de venda geral)
+    opPorTipo: { carro: (s.notavia_op_venda_carro || '').trim(), moto: (s.notavia_op_venda_moto || '').trim(), bike: (s.notavia_op_venda_bike || '').trim() },
     ncm: { carro: so(s.notavia_ncm_carro), moto: so(s.notavia_ncm_moto), bike: so(s.notavia_ncm_bike) },
     cest: { carro: so(s.notavia_cest_carro), moto: so(s.notavia_cest_moto), bike: so(s.notavia_cest_bike) },
   };
@@ -58,8 +60,11 @@ async function ibgeDoCep(cep) {
   try { const r = await fetch(`https://viacep.com.br/ws/${c}/json/`, { signal: AbortSignal.timeout(6000) }); const j = await r.json(); return j && j.ibge ? String(j.ibge) : null; } catch (e) { return null; }
 }
 
+const opDaVenda = (c, v) => c.opPorTipo[v.categoria] || c.opVenda;
+const condicao = (v) => (v.condicao === 'novo' || v.condicao === 'usado' ? v.condicao : v.categoria === 'bike' ? 'novo' : 'usado');
 function descricaoProduto(v) {
-  const base = `VEICULO USADO ${descVeiculo(v)}${v.ano_fab || v.ano_mod ? ` ${v.ano_fab || ''}/${v.ano_mod || ''}` : ''}${v.cor ? ' ' + v.cor : ''}`;
+  const tipo = v.categoria === 'bike' ? `BICICLETA ELETRICA${condicao(v) === 'usado' ? ' USADA' : ''}` : `VEICULO ${condicao(v) === 'novo' ? 'NOVO' : 'USADO'}`;
+  const base = `${tipo} ${descVeiculo(v)}${v.ano_fab || v.ano_mod ? ` ${v.ano_fab || ''}/${v.ano_mod || ''}` : ''}${v.cor ? ' ' + v.cor : ''}`;
   return base.toUpperCase().replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 function infoVeiculo(v) {
@@ -80,12 +85,12 @@ function dadosVenda(vendaId) {
   const pend = [];
   if (!c.chave) pend.push({ campo: 'config', msg: 'Chave da Notavia não configurada (Configurações → Fiscal).' });
   if (c.cnpj.length !== 14) pend.push({ campo: 'config', msg: 'CNPJ do emitente não configurado (Configurações → Fiscal ou Dados da empresa).' });
-  if (!c.opVenda) pend.push({ campo: 'config', msg: 'Código da operação fiscal de venda não configurado (Configurações → Fiscal).' });
+  if (!opDaVenda(c, v)) pend.push({ campo: 'config', msg: `Operação fiscal de venda não definida para ${({ carro: 'carro', moto: 'moto', bike: 'bike elétrica' })[v.categoria] || v.categoria} (Fiscal → Operações fiscais → Usar na venda).` });
   // em produção a série é obrigatória: sem ela a Notavia usa a série padrão do emitente, que pode ser a de outro sistema
   if (c.ambiente === 'producao' && !c.serie) pend.push({ campo: 'config', msg: 'Em produção, informe a série da NF-e (Configurações → Fiscal) para não usar a série padrão do emitente.' });
   if (s.status === 'cancelada') pend.push({ campo: 'venda', msg: 'A venda está cancelada.' });
   if (ncm.length !== 8) pend.push({ campo: 'veiculo', msg: `NCM do veículo não definido (Configurações → Fiscal, NCM de ${({ carro: 'carro', moto: 'moto', bike: 'bike elétrica' })[v.categoria] || v.categoria}).` });
-  if (!v.chassi) pend.push({ campo: 'veiculo', msg: 'Veículo sem chassi cadastrado.' });
+  if (!v.chassi) pend.push({ campo: 'veiculo', msg: v.categoria === 'bike' ? 'Bike sem número de série/chassi cadastrado.' : 'Veículo sem chassi cadastrado.' });
   if (![11, 14].includes(doc.length)) pend.push({ campo: 'cliente', msg: 'Cliente sem CPF/CNPJ válido.' });
   for (const [k, nome] of [['endereco', 'logradouro'], ['numero', 'número'], ['bairro', 'bairro'], ['cidade', 'cidade'], ['uf', 'UF']]) if (!p || !String(p[k] || '').trim()) pend.push({ campo: 'cliente', msg: `Endereço do cliente sem ${nome}.` });
   if (!p || so(p.cep).length !== 8) pend.push({ campo: 'cliente', msg: 'Cliente sem CEP válido.' });
@@ -104,7 +109,7 @@ function montarPedido({ s, v, p, pags, c, doc, ncm }, referencia, ibge) {
     referenciaExterna: referencia,
     cnpjEmitente: c.cnpj,
     cpfCnpjCliente: doc,
-    codigoOperacao: c.opVenda,
+    codigoOperacao: opDaVenda(c, v),
     ...(c.serie ? { serie: c.serie } : {}),
     ambiente: c.ambiente,
     itens: [{ codigoProduto: `V${v.id}`, quantidade: 1, valorUnitario: Math.round(s.valor_venda * 100) / 100, infoAdicional: infoVeiculo(v) || null }],
@@ -132,8 +137,11 @@ async function emitirVenda(vendaId, userId) {
     codigo: `V${d.v.id}`, descricao: descricaoProduto(d.v), ncm: d.ncm, cest: d.c.cest[d.v.categoria] || null, unidadeComercial: 'UN', gtin: null,
     valorUnitario: Math.round(d.s.valor_venda * 100) / 100, origemMercadoria: 0, grupoProdutoId: null,
   });
+  // natureza para a lista (descrição da operação na Notavia; se a consulta falhar, um texto padrão)
+  let natureza = d.v.categoria === 'bike' && condicao(d.v) === 'novo' ? 'Venda de mercadoria' : 'Venda de veículo usado';
+  try { const ops = await notavia('GET', '/operacoes-fiscais?pagina=1&tamanho=100'); const o = ((ops && (ops.items || ops.itens)) || []).find((x) => x.codigo === opDaVenda(d.c, d.v)); if (o && o.descricao) natureza = o.descricao; } catch (e) { /* segue com o padrão */ }
   const nota = db.prepare(`INSERT INTO notas_fiscais(venda_id,veiculo_id,pessoa_id,natureza,operacao_codigo,ambiente,referencia,status,valor,destinatario,cpf_cnpj,criado_por)
-    VALUES (?,?,?,?,?,?,?,'pendente',?,?,?,?)`).run(d.s.id, d.v.id, d.p.id, 'Venda de veículo', d.c.opVenda, d.c.ambiente, `tmp-${Date.now()}-${Math.random()}`, d.s.valor_venda, d.p.nome, d.doc, userId);
+    VALUES (?,?,?,?,?,?,?,'pendente',?,?,?,?)`).run(d.s.id, d.v.id, d.p.id, natureza, opDaVenda(d.c, d.v), d.c.ambiente, `tmp-${Date.now()}-${Math.random()}`, d.s.valor_venda, d.p.nome, d.doc, userId);
   const id = Number(nota.lastInsertRowid);
   // única de verdade: a Notavia devolve o job antigo se a referência se repetir (ex.: banco restaurado de backup)
   const referencia = `m2-venda-${d.s.id}-nf-${id}-${Date.now().toString(36)}`;
@@ -217,7 +225,7 @@ function rotas(api, can) {
   api.get('/fiscal/vendas/:id/previa', can('fiscal'), (req, res) => {
     const d = dadosVenda(Number(req.params.id));
     res.json({ pendencias: d.pend, ambiente: d.c.ambiente, valor: d.s.valor_venda, cliente: d.p && { nome: d.p.nome, cpf_cnpj: d.p.cpf_cnpj, cidade: d.p.cidade, uf: d.p.uf }, veiculo: { descricao: descricaoProduto(d.v), info: infoVeiculo(d.v), ncm: d.ncm },
-      pagamentos: d.pags.map((g) => ({ forma: g.forma, valor: g.valor, tpag: TPAG[g.forma] || '99' })), operacao: d.c.opVenda,
+      pagamentos: d.pags.map((g) => ({ forma: g.forma, valor: g.valor, tpag: TPAG[g.forma] || '99' })), operacao: opDaVenda(d.c, d.v),
       notas: db.prepare('SELECT id,numero,serie,status,ambiente,criado_em,motivo FROM notas_fiscais WHERE venda_id=? ORDER BY id DESC').all(d.s.id).map((n) => ({ ...n, status_txt: STATUS_TXT[n.status] })) });
   });
   api.post('/fiscal/vendas/:id/emitir', can('fiscal'), async (req, res, next) => { try { res.json(publica(await emitirVenda(Number(req.params.id), req.user.id))); } catch (e) { next(e); } });
@@ -244,7 +252,8 @@ function rotas(api, can) {
         todas.push(...itens);
         if (!r || !r.total || todas.length >= r.total || !itens.length) break;
       }
-      res.json({ operacoes: todas.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))), op_venda: cfg().opVenda });
+      const c = cfg();
+      res.json({ operacoes: todas.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo))), op_venda: c.opVenda, op_tipo: c.opPorTipo });
     } catch (e) { next(e); }
   });
   api.put('/fiscal/operacoes/:codigo', can('config'), async (req, res, next) => {
@@ -265,13 +274,25 @@ function rotas(api, can) {
       if (!ok.test(d.cfopDentroEstado) || !ok.test(d.cfopForaEstado)) throw bad(d.tipoOperacao === 0 ? 'Operação de entrada usa CFOP começando com 1, 2 ou 3.' : 'Operação de saída usa CFOP começando com 5, 6 ou 7.');
       const r = await notavia('PUT', `/operacoes-fiscais/${encodeURIComponent(codigo)}`, d);
       if (Number(b.usar_na_venda)) db.prepare("INSERT INTO settings(key,value) VALUES ('notavia_op_venda',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(codigo);
+      for (const t of ['carro', 'moto', 'bike']) if (Number(b['usar_' + t])) db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(`notavia_op_venda_${t}`, codigo);
       res.json(r || d);
     } catch (e) { next(e); }
   });
+  // define em quais tipos de veículo a operação é usada na venda (tipos: carro, moto, bike; vazio = geral)
   api.put('/fiscal/operacao-venda', can('config'), (req, res) => {
-    const codigo = String((req.body || {}).codigo || '').trim();
+    const b = req.body || {};
+    const codigo = String(b.codigo || '').trim();
     if (!codigo) throw bad('Escolha a operação.');
-    db.prepare("INSERT INTO settings(key,value) VALUES ('notavia_op_venda',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(codigo);
+    const set = db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+    const tipos = Array.isArray(b.tipos) ? b.tipos.filter((t) => ['carro', 'moto', 'bike'].includes(t)) : null;
+    if (!tipos) { set.run('notavia_op_venda', codigo); return res.json({ ok: true }); }
+    const c = cfg();
+    for (const t of ['carro', 'moto', 'bike']) {
+      const atual = c.opPorTipo[t] || c.opVenda;
+      if (tipos.includes(t)) set.run(`notavia_op_venda_${t}`, codigo);
+      else if (atual === codigo) set.run(`notavia_op_venda_${t}`, ''); // desmarcou: volta para a geral
+    }
+    if (!c.opVenda) set.run('notavia_op_venda', codigo);
     res.json({ ok: true });
   });
   api.get('/fiscal/notas/:id/xml', can('fiscal'), arquivo('xml'));
