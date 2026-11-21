@@ -498,30 +498,42 @@ function tabResumo(el, v, reload) {
   });
 }
 
-async function custoForm(v, c, reload) {
+// pre: dados vindos da leitura de recibo (IA) para pré-preencher um custo novo; o usuário confere e salva
+async function custoForm(v, c, reload, pre = null) {
   let socios = [];
   try { socios = await get('/socios?simples=1'); } catch (e) { /* sem sócios: só caixa da loja */ }
   const opcSocio = socios.filter((s) => s.ativo || (c && c.pago_por === s.id)).map((s) => [s.loja ? '' : s.id, s.nome]);
   modal({
-    title: c ? 'Editar custo' : 'Lançar custo', size: 'wide',
-    body: `<div class="form-grid">${field('Data', 'data', c ? c.data : today(), { type: 'date', cls: 'c3' })}
-      ${selectField('Categoria', 'categoria', CUSTO_CATS, c ? c.categoria : 'Mecânica', { cls: 'c3' })}
-      ${moneyField('Valor', 'valor', c && c.valor, { cls: 'c3', attrs: 'required' })}
+    title: c ? 'Editar custo' : pre ? 'Conferir custo lido do recibo' : 'Lançar custo', size: 'wide',
+    body: `${pre ? `<div class="alert ${pre.confianca === 'alta' ? 'info' : ''}" style="margin-bottom:14px">Lido pela IA${pre.confianca ? ` (confiança ${esc(pre.confianca === 'media' ? 'média' : pre.confianca)})` : ''}. <strong>Confira os valores antes de salvar.</strong>${pre.observacao ? ` ${esc(pre.observacao)}` : ''}${pre.e_recibo === false ? ' O arquivo não parece ser um recibo.' : ''}</div>` : ''}
+      <div class="form-grid">${field('Data', 'data', c ? c.data : (pre && pre.data) || today(), { type: 'date', cls: 'c3' })}
+      ${selectField('Categoria', 'categoria', CUSTO_CATS, c ? c.categoria : (pre && pre.categoria) || 'Mecânica', { cls: 'c3' })}
+      ${moneyField('Valor', 'valor', c ? c.valor : pre && pre.valor_total, { cls: 'c3', attrs: 'required' })}
       <label class="check c3" style="margin-top:42px"><input type="checkbox" name="pago" ${!c || c.lanc_status === 'pago' ? 'checked' : ''}> Já pago</label>
-      ${field('Descrição', 'descricao', c && c.descricao, { cls: 'c8', attrs: 'placeholder="Ex.: troca de pastilhas e discos"' })}
-      ${field('Fornecedor / oficina', 'fornecedor', c && c.fornecedor, { cls: 'c4' })}
+      ${field('Descrição', 'descricao', c ? c.descricao : pre && pre.descricao, { cls: 'c8', attrs: 'placeholder="Ex.: troca de pastilhas e discos"' })}
+      ${field('Fornecedor / oficina', 'fornecedor', c ? c.fornecedor : pre && pre.fornecedor, { cls: 'c4' })}
       ${opcSocio.length > 1 ? selectField('Pago por', 'pago_por', opcSocio, c && c.pago_por ? c.pago_por : '', { cls: 'c6' }) : ''}
+      ${pre && pre.file ? `<label class="check c12"><input type="checkbox" name="guardar_recibo" checked> Guardar o recibo (${esc(pre.file.name)}) nos documentos anexados do veículo</label>` : ''}
       <p class="hint c12">O custo entra no cálculo de margem do veículo e gera uma saída no fluxo de caixa (paga ou a pagar).${opcSocio.length > 1 ? ' Se um sócio pagou, ele vira aporte desse sócio no carro.' : ''}</p></div>`,
     onSubmit: async (d) => {
+      const guardar = d.guardar_recibo; delete d.guardar_recibo;
       if (c) await put('/custos/' + c.id, d); else await post(`/veiculos/${v.id}/custos`, d);
-      toast('Custo salvo.'); tabAtual = 'custos'; reload();
+      if (pre && pre.file && guardar) {
+        const fd = new FormData();
+        fd.append('descricoes', `Recibo: ${d.descricao || d.categoria}${d.fornecedor ? ' – ' + d.fornecedor : ''}`.slice(0, 500));
+        fd.append('arquivos', pre.file);
+        try { await api(`/veiculos/${v.id}/anexos`, { method: 'POST', body: fd }); } catch (e) { toast('Custo salvo, mas o recibo não foi anexado: ' + e.message, true); tabAtual = 'custos'; reload(); return; }
+      }
+      toast(pre && pre.file && guardar ? 'Custo salvo e recibo anexado.' : 'Custo salvo.'); tabAtual = 'custos'; reload();
     },
   });
 }
 
 function tabCustos(el, v, reload) {
   const rows = v.custos;
-  el.innerHTML = `<div class="card"><div class="card-h"><h2>Custos do veículo</h2><button class="btn sm" id="add">${icon('plus')}Lançar custo</button></div>
+  el.innerHTML = `<div class="card"><div class="card-h"><h2>Custos do veículo</h2><div style="display:flex;gap:8px;flex-wrap:wrap">
+      <label class="btn sm ghost" style="margin:0;cursor:pointer" title="Tire uma foto ou escolha o PDF da nota: a IA preenche o custo para você conferir">${icon('doc')}Ler recibo<input type="file" id="recibo" hidden accept="image/jpeg,image/png,image/webp,application/pdf,image/*"></label>
+      <button class="btn sm" id="add">${icon('plus')}Lançar custo</button></div></div>
     ${table([
       { label: 'Data', html: (c) => dt(c.data) }, { label: 'Categoria', key: 'categoria' }, { label: 'Descrição', key: 'descricao' }, { label: 'Fornecedor', key: 'fornecedor' },
       { label: 'Pagamento', html: (c) => (c.lanc_status === 'pago' ? pill('Pago', 'ok') : pill('A pagar', 'warn')) },
@@ -534,6 +546,18 @@ function tabCustos(el, v, reload) {
       <div class="kpi"><div class="k">Custos</div><div class="v">${brl(v.custos_total)}</div></div>
       <div class="kpi dark"><div class="k">Custo total</div><div class="v">${brl(v.custo_total)}</div><div class="s">Margem prevista: ${brl(v.margem)} (${pct(v.margem_pct)})</div></div></div>`;
   el.querySelector('#add').onclick = () => custoForm(v, null, reload);
+  el.querySelector('#recibo').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    const espera = modal({ title: 'Lendo o recibo…', body: `<p style="margin:0">A IA está lendo <strong>${esc(file.name)}</strong>. Isso leva alguns segundos.</p><div class="meter" style="margin-top:14px"><i class="lendo" style="width:40%"></i></div>` });
+    try {
+      const fd = new FormData(); fd.append('arquivo', file);
+      const r = await api('/recibo/ler', { method: 'POST', body: fd });
+      espera.close();
+      custoForm(v, null, reload, { ...r, file });
+    } catch (err) { espera.close(); fail(err); }
+  };
   el.querySelectorAll('tbody tr').forEach((tr, i) => {
     const c = rows[i];
     tr.querySelector('[data-ed]').onclick = () => custoForm(v, c, reload);

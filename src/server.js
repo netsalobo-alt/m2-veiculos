@@ -142,6 +142,7 @@ require('./routes-socios')(api, can);
 require('./backup').rotas(api, can);
 require('./routes-contas-fixas').rotas(api, can);
 require('./routes-funcionarios')(api, can);
+require('./recibo').rotas(api, can);
 app.use('/api', api);
 
 // erros
