@@ -368,6 +368,12 @@ module.exports = function (api, can) {
     res.json(out);
   });
 
+  // capital de giro para reposição de estoque (somente consulta)
+  api.get('/capital-giro', can('financeiro'), (req, res) => {
+    const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : today().slice(0, 7);
+    res.json(require('./capital-giro').capitalGiro(mes));
+  });
+
   // ---------- relatórios ----------
   const periodo = (req) => [req.query.de || firstOfMonth(), req.query.ate || today()];
   const sub = (de, ate) => `Período: ${dataBR(de)} a ${dataBR(ate)}`;

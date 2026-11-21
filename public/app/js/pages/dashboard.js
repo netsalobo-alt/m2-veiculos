@@ -1,4 +1,4 @@
-import { get, esc, brl, num, dt, can, state, barChart, MESES, CATEG, icon } from '../core.js';
+import { get, esc, brl, num, dt, can, state, barChart, MESES, CATEG, icon, today, table, fail } from '../core.js';
 import { setCrumbs } from '../main.js';
 
 export async function render(view) {
@@ -27,6 +27,8 @@ export async function render(view) {
     <div class="kpi"><div class="k">Documentos aguardando assinatura</div><div class="v">${d.docs_pendentes}</div><div class="s"><a class="linkbtn" href="#/documentos">Ver documentos</a></div></div>
   </div>
 
+  ${can('financeiro') ? '<section class="card cg" id="cg" style="margin-top:18px"></section>' : ''}
+
   <div class="grid g-main" style="margin-top:18px">
     <section class="card"><div class="card-h"><h2>Faturamento dos últimos 6 meses</h2></div>
       ${barChart(d.meses.map((m) => ({ label: MESES[Number(m.mes.slice(5)) - 1], v: m.valor, tip: `${MESES[Number(m.mes.slice(5)) - 1]}/${m.mes.slice(2, 4)}: ${brl(m.valor)} · ${m.qtd} venda(s)${m.lucro != null ? ' · lucro ' + brl(m.lucro) : ''}` })))}
@@ -52,4 +54,62 @@ export async function render(view) {
       </tbody></table></div>` : '<div class="empty">Nenhuma venda registrada neste mês.</div>'}
     </section>
   </div>`;
+  const cg = view.querySelector('#cg');
+  if (cg) capitalGiro(cg).catch(fail);
+}
+
+// ------------------------------------------------------------------ capital de giro para reposição de estoque (consulta)
+const MES_LONGO = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+let cgMes = null;
+async function capitalGiro(el) {
+  cgMes = cgMes || today().slice(0, 7);
+  const r = await get('/capital-giro?mes=' + cgMes);
+  const [ano, m] = cgMes.split('-').map(Number);
+  const mover = (n) => { const d = new Date(ano, m - 1 + n, 1); cgMes = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; capitalGiro(el).catch(fail); };
+  const anos = []; const a0 = Number((r.primeiro_mes || cgMes).slice(0, 4)); for (let y = Math.min(a0, ano); y <= Math.max(Number(today().slice(0, 4)), ano); y++) anos.push(y);
+  const bloco = (k, v, s, cls = '') => `<div class="cg-box ${cls}"><span class="k">${k}</span><strong class="${v < 0 ? 'neg' : ''}">${brl(v)}</strong><span class="s">${s}</span></div>`;
+  const op = (x) => `<span class="cg-op" aria-hidden="true">${x}</span>`;
+  const fimTxt = `${dt(r.fim)}`;
+  el.innerHTML = `<div class="card-h" style="flex-wrap:wrap;gap:10px"><div><h2 style="margin:0">Capital de giro para reposição de estoque</h2>
+      <p class="muted" style="margin:4px 0 0;font-size:13px">Somente consulta. Posição em ${fimTxt}: o dinheiro dos sócios, menos o que está parado em carros no pátio e o que ainda falta voltar das vendas.</p></div>
+      <div class="seg cg-filtro" role="group" aria-label="Mês e ano"><button type="button" data-n="-1" aria-label="Mês anterior">←</button>
+        <select id="cg-m" aria-label="Mês">${MES_LONGO.map((n, i) => `<option value="${i + 1}" ${i + 1 === m ? 'selected' : ''}>${n}</option>`).join('')}</select>
+        <select id="cg-a" aria-label="Ano">${anos.map((y) => `<option ${y === ano ? 'selected' : ''}>${y}</option>`).join('')}</select>
+        <button type="button" data-n="1" aria-label="Próximo mês">→</button></div></div>
+    <div class="cg-eq ${r.sem_veiculo ? '' : 'cg-4'}">
+      ${bloco('Aportes dos sócios', r.aportes, r.mes_aportes ? `no mês: ${brl(r.mes_aportes)}${r.aportes_socios.length ? ' · ' + r.aportes_socios.map((a) => `${esc(a.socio.split(' ')[0])} ${brl(a.valor)}`).join(' · ') : ''}` : 'total colocado pelos sócios', 'pos')}${op('−')}
+      ${bloco('Parado no estoque', r.estoque, `pago dos ${r.estoque_qtd} carro(s) no pátio · custo cadastrado ${brl(r.estoque_custo)}`, 'negbox')}${op('−')}
+      ${bloco('Falta voltar das vendas', r.falta_vendas, `${r.vendidos_qtd} vendido(s): custo pago ${brl(r.vendidos_pago)} · já recuperado ${brl(r.vendidos_recuperado)}`, 'negbox')}
+      ${r.sem_veiculo ? `${op('−')}${bloco('Pagos sem veículo', r.sem_veiculo, 'compras ou preparação sem carro ligado: confira a categoria', 'warnbox')}` : ''}${op('=')}
+      ${bloco('Capital de giro', r.saldo, `em ${fimTxt} · mês anterior: ${brl(r.saldo_anterior)}`, 'dark')}
+    </div>
+    <p class="small" style="margin:12px 0 0">No mês: entraram ${brl(r.mes_aportes)} de aportes, voltaram ${brl(r.mes_recuperado)} das vendas (até o custo de cada carro) e foram pagos ${brl(r.mes_pago)} em compras e preparação. Parcelas pendentes e veículos recebidos na troca não contam como dinheiro disponível.</p>
+    <details style="margin-top:12px"><summary class="muted" style="cursor:pointer;font-size:13px">Ver detalhes</summary>
+      <h3 style="font-size:14px;margin:14px 0 8px">Carros parados no estoque em ${fimTxt}</h3>
+      ${table([
+        { label: 'Veículo', html: (c) => `<a class="linkbtn" href="#/veiculo/${c.veiculo_id}">${esc(c.veiculo)}</a>${c.placa ? `<div class="t2">${esc(c.placa)}</div>` : ''}` },
+        { label: 'Custo cadastrado', num: true, html: (c) => brl(c.custo) },
+        { label: 'Já pago', num: true, html: (c) => `<strong>${brl(c.pago)}</strong>` },
+        { label: 'Diferença', num: true, html: (c) => (Math.abs(c.custo - c.pago) < 0.01 ? '<span class="muted">—</span>' : `<span class="gold">${brl(c.custo - c.pago)}</span>`) },
+      ], r.carros, { empty: 'Nenhum carro com pagamento no estoque.', foot: r.carros.length ? ['Total', brl(r.estoque_custo), brl(r.estoque), brl(r.estoque_custo - r.estoque)] : null })}
+      <h3 style="font-size:14px;margin:16px 0 8px">Capital recuperado das vendas no mês</h3>
+      ${table([
+        { label: 'Veículo vendido', html: (v) => `<a class="linkbtn" href="#/venda/${v.venda_id}">${esc(v.veiculo)}</a><div class="t2">${esc(v.placa || '')} · venda em ${dt(v.data_venda)}</div>` },
+        { label: 'Compra + preparação', num: true, html: (v) => brl(v.custo) },
+        { label: 'Recebido no mês', num: true, html: (v) => brl(v.recebido_mes) },
+        { label: 'Recuperado no mês', num: true, html: (v) => `<strong class="pos">${brl(v.recuperado_mes)}</strong>` },
+        { label: 'Falta recuperar', num: true, html: (v) => (v.falta > 0.009 ? brl(v.falta) : '<span class="pill ok">Recuperado</span>') },
+      ], r.vendas, { empty: 'Nenhum recebimento de venda neste mês.' })}
+      <h3 style="font-size:14px;margin:16px 0 8px">Pagamentos de compra e preparação no mês</h3>
+      ${table([
+        { label: 'Data', html: (p) => dt(p.data) },
+        { label: 'Descrição', html: (p) => `${esc(p.descricao)}${p.veiculo ? `<div class="t2"><a class="linkbtn" href="#/veiculo/${p.veiculo_id}">${esc(p.veiculo)}</a>${p.placa ? ' · ' + esc(p.placa) : ''}</div>` : ''}` },
+        { label: 'Tipo', html: (p) => (p.categoria === 'Compra de veículos' ? 'Compra' : 'Preparação') },
+        { label: 'Carro', html: (p) => (p.grupo === 'vendidos' ? '<span class="pill">Já vendido</span>' : p.grupo === 'estoque' ? '<span class="pill info">No estoque</span>' : '<span class="pill warn" title="Lançamento sem veículo ligado. Confira a categoria ou ligue ao carro.">Sem veículo</span>') },
+        { label: 'Valor', num: true, html: (p) => `<strong class="neg">${brl(p.valor)}</strong>` },
+      ], r.pagamentos, { empty: 'Nenhuma compra ou preparação paga neste mês.' })}
+    </details>`;
+  el.querySelectorAll('[data-n]').forEach((b) => (b.onclick = () => mover(Number(b.dataset.n))));
+  const muda = () => { cgMes = `${el.querySelector('#cg-a').value}-${String(el.querySelector('#cg-m').value).padStart(2, '0')}`; capitalGiro(el).catch(fail); };
+  el.querySelector('#cg-m').onchange = muda; el.querySelector('#cg-a').onchange = muda;
 }
