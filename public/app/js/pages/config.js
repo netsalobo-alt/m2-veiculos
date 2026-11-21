@@ -63,8 +63,12 @@ export async function render(view, { params = {} } = {}) {
       ${field('Chave da API (X-Api-Key)', 'notavia_api_key', s.notavia_api_key, { type: 'password', cls: 'c8', attrs: 'autocomplete="off" placeholder="enfe_..."', hint: s.notavia_api_key ? 'Chave configurada. Para trocar, apague e cole a nova.' : 'Sem chave, não é possível emitir.' })}
       ${selectField('Ambiente', 'notavia_ambiente', { homologacao: 'Homologação (teste, sem valor fiscal)', producao: 'Produção (nota válida)' }, s.notavia_ambiente || 'homologacao', { cls: 'c4' })}
       ${field('CNPJ do emitente', 'notavia_cnpj', s.notavia_cnpj, { cls: 'c4', attrs: 'inputmode="numeric"', hint: 'Vazio = usa o CNPJ dos dados da empresa.' })}
-      ${field('Código da operação de venda', 'notavia_op_venda', s.notavia_op_venda, { cls: 'c4', attrs: 'placeholder="Ex.: VENDA"', hint: 'O código cadastrado em Operações fiscais no portal da Notavia.' })}
+      ${field('Operação de venda (geral)', 'notavia_op_venda', s.notavia_op_venda, { cls: 'c4', attrs: 'placeholder="Ex.: Venda"', hint: 'Código da operação usada quando o tipo não tem uma própria.' })}
       ${field('Série', 'notavia_serie', s.notavia_serie, { cls: 'c4', attrs: 'inputmode="numeric" placeholder="Ex.: 2"', hint: 'Obrigatória em produção. A série precisa estar cadastrada na Notavia no mesmo ambiente (homologação e produção são separados).' })}
+      <p class="form-sec c12">Operação de venda por tipo (vazio = a geral). Também dá para escolher em Fiscal → Operações fiscais.</p>
+      ${field('Operação: carro', 'notavia_op_venda_carro', s.notavia_op_venda_carro, { cls: 'c4', attrs: 'placeholder="(geral)"' })}
+      ${field('Operação: moto', 'notavia_op_venda_moto', s.notavia_op_venda_moto, { cls: 'c4', attrs: 'placeholder="(geral)"' })}
+      ${field('Operação: bike elétrica', 'notavia_op_venda_bike', s.notavia_op_venda_bike, { cls: 'c4', attrs: 'placeholder="Ex.: VendaMercadoria"' })}
       <p class="form-sec c12">NCM e CEST por tipo de veículo (confirme com o contador)</p>
       ${field('NCM carro', 'notavia_ncm_carro', s.notavia_ncm_carro, { cls: 'c4', attrs: 'inputmode="numeric" placeholder="8 dígitos"', hint: 'Depende da cilindrada (posição 8703).' })}
       ${field('NCM moto', 'notavia_ncm_moto', s.notavia_ncm_moto, { cls: 'c4', attrs: 'inputmode="numeric" placeholder="8 dígitos"', hint: 'Posição 8711, conforme cilindrada.' })}

@@ -6,7 +6,7 @@ const { db, DATA_DIR, getSettings, contaPadrao } = require('./db');
 const { today, diasEntre, descVeiculo } = require('./util');
 const { bad, pick } = require('./routes-cadastros');
 
-const VEIC_FIELDS = ['categoria', 'marca', 'modelo', 'versao', 'ano_fab', 'ano_mod', 'placa', 'renavam', 'chassi', 'cor', 'km', 'combustivel', 'cambio', 'portas', 'motor', 'autonomia', 'bateria', 'opcionais', 'descricao', 'data_entrada', 'fornecedor_id', 'origem', 'valor_compra', 'compra_pago', 'forma_pagamento_compra', 'preco_venda', 'preco_minimo', 'status', 'publicado', 'destaque'];
+const VEIC_FIELDS = ['categoria', 'marca', 'modelo', 'versao', 'ano_fab', 'ano_mod', 'placa', 'renavam', 'chassi', 'cor', 'km', 'combustivel', 'cambio', 'portas', 'motor', 'autonomia', 'bateria', 'opcionais', 'descricao', 'data_entrada', 'fornecedor_id', 'origem', 'valor_compra', 'compra_pago', 'forma_pagamento_compra', 'preco_venda', 'preco_minimo', 'status', 'publicado', 'destaque', 'condicao'];
 const COST_SENSITIVE = ['valor_compra', 'compra_pago', 'forma_pagamento_compra', 'preco_minimo', 'custos_total', 'custo_total', 'margem', 'margem_pct', 'fornecedor_id', 'fornecedor_nome', 'custos', 'lucro'];
 
 const upload = multer({

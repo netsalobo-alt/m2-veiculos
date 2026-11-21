@@ -97,6 +97,7 @@ function veiculoForm(v = {}) {
     <p class="form-sec">Entrada e compra</p>
     ${field('Data de entrada no pátio', 'data_entrada', v.data_entrada || today(), { type: 'date', cls: 'c3' })}
     ${selectField('Origem', 'origem', { compra: 'Compra', troca: 'Recebido na troca', consignado: 'Consignado' }, v.origem || 'compra', { cls: 'c3' })}
+    ${selectField('Condição (NF-e)', 'condicao', [['', 'Padrão do tipo (bike: nova; carro/moto: usado)'], ['usado', 'Usado'], ['novo', 'Novo (0 km)']], v.condicao || '', { cls: 'c3' })}
     <div class="c6" data-forn></div>
     ${custo ? `${moneyField('Valor de compra', 'valor_compra', v.valor_compra, { cls: 'c3' })}
     ${selectField('Forma de pagamento da compra', 'forma_pagamento_compra', { '': '—', ...FORMAS }, v.forma_pagamento_compra, { cls: 'c3' })}
