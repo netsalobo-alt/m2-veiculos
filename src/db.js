@@ -191,6 +191,32 @@ db.exec(`CREATE TABLE IF NOT EXISTS veiculo_anexos (
 );
 CREATE INDEX IF NOT EXISTS ix_anexos_veic ON veiculo_anexos(veiculo_id);`);
 if (!db.prepare('PRAGMA table_info(veiculo_anexos)').all().some((c) => c.name === 'descricao')) db.exec('ALTER TABLE veiculo_anexos ADD COLUMN descricao TEXT');
+// notas fiscais (NF-e) emitidas pela Notavia. O sistema guarda o pedido, o andamento e os arquivos (XML/DANFE)
+db.exec(`CREATE TABLE IF NOT EXISTS notas_fiscais (
+  id INTEGER PRIMARY KEY,
+  venda_id INTEGER REFERENCES vendas(id) ON DELETE SET NULL,
+  veiculo_id INTEGER REFERENCES veiculos(id) ON DELETE SET NULL,
+  pessoa_id INTEGER REFERENCES pessoas(id) ON DELETE SET NULL,
+  natureza TEXT, operacao_codigo TEXT, ambiente TEXT NOT NULL DEFAULT 'homologacao',
+  referencia TEXT NOT NULL UNIQUE, job_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pendente',   -- pendente | processando | autorizada | rejeitada | falha | cancelada
+  numero INTEGER, serie INTEGER, chave TEXT, protocolo TEXT, cstat INTEGER, motivo TEXT,
+  valor REAL, destinatario TEXT, cpf_cnpj TEXT,
+  xml_arquivo TEXT, danfe_arquivo TEXT, payload TEXT, resposta TEXT,
+  tentativas INTEGER DEFAULT 0,
+  criado_por INTEGER REFERENCES users(id),
+  criado_em TEXT DEFAULT (datetime('now','localtime')),
+  atualizado_em TEXT, autorizada_em TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_nf_venda ON notas_fiscais(venda_id);
+CREATE INDEX IF NOT EXISTS ix_nf_status ON notas_fiscais(status);`);
+{ // dados fiscais extras: código IBGE do município do cliente e NCM próprio do veículo (opcional)
+  const cp = db.prepare('PRAGMA table_info(pessoas)').all().map((c) => c.name);
+  if (!cp.includes('municipio_ibge')) db.exec('ALTER TABLE pessoas ADD COLUMN municipio_ibge TEXT');
+  if (!cp.includes('inscricao_estadual')) db.exec('ALTER TABLE pessoas ADD COLUMN inscricao_estadual TEXT');
+  const cv = db.prepare('PRAGMA table_info(veiculos)').all().map((c) => c.name);
+  if (!cv.includes('ncm')) db.exec('ALTER TABLE veiculos ADD COLUMN ncm TEXT');
+}
 // funcionários da loja (salários são lançados no financeiro ligados a eles)
 db.exec(`CREATE TABLE IF NOT EXISTS funcionarios (
   id INTEGER PRIMARY KEY,
@@ -243,6 +269,8 @@ const DEFAULT_SETTINGS = {
   foro: '',
   fipe_token: '',
   openai_api_key: '',
+  notavia_api_key: '', notavia_url: 'https://app.notavia.com.br', notavia_ambiente: 'homologacao', notavia_cnpj: '', notavia_serie: '',
+  notavia_op_venda: '', notavia_ncm_carro: '', notavia_ncm_moto: '', notavia_ncm_bike: '', notavia_cest_carro: '', notavia_cest_moto: '', notavia_cest_bike: '',
   openai_modelo: '',
 };
 const insSetting = db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)');

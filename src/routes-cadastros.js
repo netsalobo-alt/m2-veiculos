@@ -81,6 +81,7 @@ module.exports = function (api, can) {
     s.smtp_pass = s.smtp_pass ? '********' : '';
     s.fipe_token = s.fipe_token ? '********' : '';
     s.openai_api_key = s.openai_api_key ? '********' : '';
+    s.notavia_api_key = s.notavia_api_key ? '********' : '';
     s.olx_client_secret = s.olx_client_secret ? '********' : '';
     delete s.olx_access_token; // nunca sai do servidor
     res.json(s);
@@ -89,7 +90,7 @@ module.exports = function (api, can) {
     const up = db.prepare('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
     const tx = db.transaction((o) => {
       for (const [k, v] of Object.entries(o)) {
-        if ((k === 'smtp_pass' || k === 'fipe_token' || k === 'olx_client_secret' || k === 'openai_api_key') && v === '********') continue;
+        if ((k === 'smtp_pass' || k === 'fipe_token' || k === 'olx_client_secret' || k === 'openai_api_key' || k === 'notavia_api_key') && v === '********') continue;
         if (['olx_access_token', 'olx_conta', 'olx_conectado_em', 'site_conteudo'].includes(k)) continue; // gravados só pelo próprio sistema
         up.run(k, v == null ? '' : String(v));
       }

@@ -12,9 +12,9 @@ app.use(express.json({ limit: '5mb' }));
 
 // ---------------- autenticação ----------------
 const PERMS = {
-  admin: ['estoque', 'custos', 'pessoas', 'vendas', 'documentos', 'financeiro', 'relatorios', 'leads', 'usuarios', 'config'],
-  gerente: ['estoque', 'custos', 'pessoas', 'vendas', 'documentos', 'financeiro', 'relatorios', 'leads', 'config'],
-  financeiro: ['estoque', 'custos', 'pessoas', 'vendas', 'documentos', 'financeiro', 'relatorios'],
+  admin: ['estoque', 'custos', 'pessoas', 'vendas', 'documentos', 'financeiro', 'relatorios', 'leads', 'usuarios', 'config', 'fiscal'],
+  gerente: ['estoque', 'custos', 'pessoas', 'vendas', 'documentos', 'financeiro', 'relatorios', 'leads', 'config', 'fiscal'],
+  financeiro: ['estoque', 'custos', 'pessoas', 'vendas', 'documentos', 'financeiro', 'relatorios', 'fiscal'],
   vendedor: ['estoque', 'pessoas', 'vendas', 'documentos', 'leads'],
 };
 function parseCookies(req) {
@@ -143,6 +143,7 @@ require('./backup').rotas(api, can);
 require('./routes-contas-fixas').rotas(api, can);
 require('./routes-funcionarios')(api, can);
 require('./recibo').rotas(api, can);
+require('./fiscal').rotas(api, can);
 app.use('/api', api);
 
 // erros
@@ -154,6 +155,7 @@ app.use('/api', (err, req, res, next) => {
 // ---------------- arquivos estáticos ----------------
 const PUB = path.join(__dirname, '..', 'public');
 app.use('/uploads/anexos', (req, res) => res.status(404).end()); // anexos só pela API, com login
+app.use('/uploads/fiscal', (req, res) => res.status(404).end()); // XML/DANFE só pela API, com login
 app.use('/uploads', express.static(path.join(DATA_DIR, 'uploads'), { maxAge: '7d' }));
 app.use(express.static(PUB, { extensions: ['html'] }));
 app.get('/assinar/:token', (req, res) => res.sendFile(path.join(PUB, 'assinar.html')));
@@ -165,5 +167,6 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`[M2] Sistema rodando em http://localhost:${PORT}`));
   require('./backup').agendar(); // backup diário (BACKUP_HORA)
   require('./routes-contas-fixas').agendar(); // contas fixas viram contas a pagar todo mês
+  require('./fiscal').agendar(); // acompanha as NF-e na fila da Notavia
 }
 module.exports = app;
