@@ -197,7 +197,7 @@ export async function detail(view, { id, params }) {
   const canc = s.status === 'cancelada';
   view.innerHTML = `<div class="ph"><div><p class="eyebrow">VENDA Nº ${s.id} · ${dt(s.data_venda)}</p><h1>${esc(vdesc(v))}</h1>
       <p>${canc ? pill('Cancelada', 'bad') : pill('Concluída', 'ok')} · ${esc(s.cliente_nome)} · vendedor ${esc(s.vendedor_nome || '–')}</p></div>
-    <div class="acts">${!canc ? `<button class="btn" id="contrato">${icon('doc')}Gerar contrato</button><button class="btn ghost" id="recibo">Recibo de pagamento</button><button class="btn ghost" id="outro">Outro documento</button>` : ''}
+    <div class="acts">${!canc && can('fiscal') ? `<button class="btn black" id="nfe">${icon('doc')}NF-e</button>` : ''}${!canc ? `<button class="btn" id="contrato">${icon('doc')}Gerar contrato</button><button class="btn ghost" id="recibo">Recibo de pagamento</button><button class="btn ghost" id="outro">Outro documento</button>` : ''}
       ${!canc && ['admin', 'gerente'].includes(state.user.perfil) ? '<button class="btn danger" id="cancelar">Cancelar venda</button>' : ''}</div></div>
     ${params.novo ? '<div class="alert info">Venda registrada. Próximo passo: gere o contrato e envie para assinatura por WhatsApp ou e-mail.</div>' : ''}
     <div class="grid g-main">
@@ -233,6 +233,7 @@ export async function detail(view, { id, params }) {
   on('#contrato', () => gerarDocumento({ venda_id: s.id, tipo: 'contrato_venda' }));
   on('#recibo', () => gerarDocumento({ venda_id: s.id, tipo: 'recibo_pagamento' }));
   on('#outro', () => gerarDocumento({ venda_id: s.id }));
+  on('#nfe', async () => { const { emitirNotaVenda } = await import('./fiscal.js'); emitirNotaVenda(s.id).catch(fail); });
   on('#cancelar', () => modal({
     title: 'Cancelar venda', body: `<p>O veículo volta para o estoque como disponível e os lançamentos financeiros desta venda serão cancelados. Um veículo recebido na troca continua no estoque.</p>${areaField('Motivo', 'motivo', '', { rows: 2 })}`,
     submitLabel: 'Cancelar venda',

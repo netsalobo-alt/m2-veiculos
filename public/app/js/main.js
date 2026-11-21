@@ -19,6 +19,8 @@ const NAV = [
   { href: '#/socios', label: 'Sócios e investimentos', icon: 'users', perm: 'custos', page: 'socios' },
   { href: '#/dre', label: 'DRE gerencial', icon: 'chart', perm: 'financeiro', page: 'dre' },
   { href: '#/relatorios', label: 'Relatórios', icon: 'chart', perm: 'relatorios', page: 'relatorios' },
+  { grp: 'Fiscal' },
+  { href: '#/fiscal', label: 'NF-e', icon: 'doc', perm: 'fiscal', page: 'fiscal' },
   { grp: 'Administração' },
   { href: '#/usuarios', label: 'Usuários', icon: 'user', perm: 'usuarios', page: 'usuarios' },
   { href: '#/site', label: 'Editar site', icon: 'globe', perm: 'config', page: 'site' },
@@ -45,6 +47,7 @@ const ROUTES = [
   [/^\/lancamentos$/, 'financeiro', 'lancamentos'],
   [/^\/contas-fixas$/, 'contasfixas', 'render'],
   [/^\/dre$/, 'dre', 'render'],
+  [/^\/fiscal$/, 'fiscal', 'list'],
   [/^\/funcionarios$/, 'funcionarios', 'list'],
   [/^\/funcionario\/(\d+)$/, 'funcionarios', 'detail'],
   [/^\/relatorios$/, 'relatorios', 'render'],
@@ -98,7 +101,7 @@ async function route() {
     const m = path.match(re);
     if (!m) continue;
     document.querySelectorAll('.side a[data-page]').forEach((a) => a.toggleAttribute('aria-current', false));
-    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', site: 'site', socios: 'socios', relatorios: 'relatorios', dashboard: 'dashboard', contasfixas: 'contasfixas', funcionarios: 'funcionarios', dre: 'dre' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
+    const navPage = { estoque: 'estoque', vendas: 'vendas', pessoas: 'pessoas', documentos: 'documentos', modelos: 'modelos', leads: 'leads', usuarios: 'usuarios', config: 'config', site: 'site', socios: 'socios', relatorios: 'relatorios', dashboard: 'dashboard', contasfixas: 'contasfixas', funcionarios: 'funcionarios', dre: 'dre', fiscal: 'fiscal' }[mod] || (fn === 'fluxo' ? 'financeiro' : 'lancamentos');
     const a = document.querySelector(`.side a[data-page="${navPage}"]`);
     if (a) a.setAttribute('aria-current', 'page');
     view.innerHTML = '<div class="empty">Carregando…</div>';
