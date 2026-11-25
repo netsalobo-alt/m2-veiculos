@@ -99,7 +99,11 @@ function dadosVenda(vendaId) {
   return { s, v, p, pags, c, doc, ncm, pend };
 }
 
-function montarPedido({ s, v, p, pags, c, doc, ncm }, referencia, ibge) {
+// texto padrão das informações complementares (o usuário pode editar antes de emitir)
+const obsPadrao = (s, v) => [`Venda nº ${s.id} - ${descVeiculo(v)}${v.placa ? ' placa ' + v.placa : ''}.`, s.valor_troca > 0 ? `Veículo recebido na troca como parte do pagamento: R$ ${Number(s.valor_troca).toFixed(2).replace('.', ',')}.` : '']
+  .filter(Boolean).join(' ').slice(0, 2000);
+
+function montarPedido({ s, v, p, pags, c, doc, ncm }, referencia, ibge, observacoes = null) {
   const pagamentos = (pags.length ? pags : [{ forma: 'outro', valor: s.valor_venda, pago: 1 }])
     .map((g) => ({ forma: TPAG[g.forma] || '99', valor: Math.round(g.valor * 100) / 100, aVista: !!g.pago || g.forma === 'troca' }));
   const pj = doc.length === 14;
@@ -114,8 +118,7 @@ function montarPedido({ s, v, p, pags, c, doc, ncm }, referencia, ibge) {
     ambiente: c.ambiente,
     itens: [{ codigoProduto: `V${v.id}`, quantidade: 1, valorUnitario: Math.round(s.valor_venda * 100) / 100, infoAdicional: infoVeiculo(v) || null }],
     pagamentos,
-    observacoes: [`Venda nº ${s.id} - ${descVeiculo(v)}${v.placa ? ' placa ' + v.placa : ''}.`, s.valor_troca > 0 ? `Veículo recebido na troca como parte do pagamento: R$ ${Number(s.valor_troca).toFixed(2).replace('.', ',')}.` : '']
-      .filter(Boolean).join(' ').slice(0, 2000),
+    observacoes: observacoes == null ? obsPadrao(s, v) : (String(observacoes).trim().slice(0, 2000) || null),
     cliente: {
       nome: p.nome, email: p.email || null, telefone: p.telefone || null,
       tipoPessoa: pj ? 1 : 0, indicadorIe: ie ? 1 : 9, inscricaoEstadual: ie || null,
@@ -124,7 +127,7 @@ function montarPedido({ s, v, p, pags, c, doc, ncm }, referencia, ibge) {
   };
 }
 
-async function emitirVenda(vendaId, userId) {
+async function emitirVenda(vendaId, userId, observacoes = null) {
   const d = dadosVenda(vendaId);
   if (d.pend.length) throw bad(`Não dá para emitir ainda: ${d.pend.map((x) => x.msg).join(' ')}`);
   // código IBGE do município (cacheado no cadastro)
@@ -145,7 +148,7 @@ async function emitirVenda(vendaId, userId) {
   const id = Number(nota.lastInsertRowid);
   // única de verdade: a Notavia devolve o job antigo se a referência se repetir (ex.: banco restaurado de backup)
   const referencia = `m2-venda-${d.s.id}-nf-${id}-${Date.now().toString(36)}`;
-  const pedido = montarPedido(d, referencia, ibge);
+  const pedido = montarPedido(d, referencia, ibge, observacoes);
   db.prepare('UPDATE notas_fiscais SET referencia=?, payload=? WHERE id=?').run(referencia, JSON.stringify(pedido), id);
   try {
     const r = await notavia('POST', '/emissoes', pedido);
@@ -159,6 +162,8 @@ async function emitirVenda(vendaId, userId) {
   return db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(id);
 }
 
+// a Notavia devolve UTC; grava no mesmo horário local de datetime('now','localtime')
+const horaLocal = (utc) => { const d = utc ? new Date(/Z|[+-]\d\d:?\d\d$/.test(utc) ? utc : utc + 'Z') : new Date(); return (isNaN(d) ? new Date() : d).toLocaleString('sv-SE').slice(0, 19); };
 const mapStatusJob = (st) => ({ Pendente: 'pendente', Processando: 'processando' })[st] || null;
 
 // consulta o job e atualiza a nota; quando aprovada, baixa XML e DANFE
@@ -175,13 +180,56 @@ async function atualizar(id) {
     else if (j.status === 'Concluido') {
       const r = j.resultado || {};
       if (['Rejeitada', 'Denegada'].includes(r.status)) upd({ status: 'rejeitada', cstat: r.cStat || null, motivo: [r.motivo, r.orientacao && (r.orientacao.mensagem || r.orientacao.texto || JSON.stringify(r.orientacao))].filter(Boolean).join(' — '), resposta: JSON.stringify(j) });
-      else if (r.chaveAcesso) upd({ status: 'autorizada', chave: r.chaveAcesso, numero: r.numero || null, serie: r.serie || null, protocolo: r.protocolo || null, motivo: null, resposta: JSON.stringify(j), autorizada_em: (j.processadoEmUtc || new Date().toISOString()).slice(0, 19).replace('T', ' ') });
+      else if (r.chaveAcesso) upd({ status: 'autorizada', chave: r.chaveAcesso, numero: r.numero || null, serie: r.serie || null, protocolo: r.protocolo || null, motivo: null, resposta: JSON.stringify(j), autorizada_em: horaLocal(j.processadoEmUtc) });
       else upd({ status: 'falha', motivo: 'Resposta da Notavia sem chave de acesso.', resposta: JSON.stringify(j) });
     } else upd({ status: mapStatusJob(j.status) || n.status, resposta: JSON.stringify(j) });
   }
+  const pc = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(id);
+  if (['pendente', 'processando'].includes(pc.cancel_status) && pc.cancel_job_id) await atualizarCancelamento(pc);
   const atual = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(id);
   if (atual.status === 'autorizada' && atual.chave && (!atual.xml_arquivo || !atual.danfe_arquivo)) await baixarArquivos(atual).catch(() => {});
   return db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(id);
+}
+
+// observações usadas na última tentativa desta venda (rejeitada/falha/cancelada), para reaproveitar o que o usuário escreveu
+function obsUltima(vendaId) {
+  const n = db.prepare('SELECT payload FROM notas_fiscais WHERE venda_id=? AND payload IS NOT NULL ORDER BY id DESC').get(vendaId);
+  try { const pd = n && JSON.parse(n.payload); return pd && 'observacoes' in pd ? pd.observacoes || '' : null; } catch (e) { return null; }
+}
+
+// cancelamento da NF-e: só a nota (evento na SEFAZ). A venda, o estoque e o financeiro não mudam.
+// Regra da SEFAZ: em geral até 24 h após a autorização; justificativa de 15 a 255 caracteres.
+async function cancelar(id, justificativa, userId) {
+  const n = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(id);
+  if (!n) throw bad('Nota não encontrada.', 404);
+  if (n.status !== 'autorizada' || !n.chave) throw bad('Só é possível cancelar uma NF-e aprovada.');
+  if (['pendente', 'processando'].includes(n.cancel_status)) throw bad('O cancelamento desta nota já está em andamento.');
+  const j = String(justificativa || '').replace(/\s+/g, ' ').trim();
+  if (j.length < 15) throw bad('A justificativa precisa ter pelo menos 15 caracteres (regra da SEFAZ).');
+  if (j.length > 255) throw bad('A justificativa pode ter no máximo 255 caracteres.');
+  const referencia = `m2-canc-${id}-${Date.now().toString(36)}`;
+  db.prepare("UPDATE notas_fiscais SET cancel_status='pendente', cancel_referencia=?, cancel_justificativa=?, cancel_motivo=NULL, cancel_por=?, atualizado_em=datetime('now','localtime') WHERE id=?").run(referencia, j, userId, id);
+  try {
+    const r = await notavia('POST', '/cancelamentos', { referenciaExterna: referencia, chaveAcesso: so(n.chave), justificativa: j });
+    db.prepare('UPDATE notas_fiscais SET cancel_job_id=?, cancel_status=?, cancel_resposta=? WHERE id=?').run(r && r.jobId, mapStatusJob(r && r.status) || 'pendente', JSON.stringify(r), id);
+  } catch (e) {
+    db.prepare("UPDATE notas_fiscais SET cancel_status='falha', cancel_motivo=? WHERE id=?").run(e.publicMessage || e.message, id);
+    throw e;
+  }
+  setTimeout(() => atualizar(id).catch(() => {}), 3000);
+  return db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(id);
+}
+
+// consulta o job do cancelamento; concluído com sucesso → nota cancelada
+async function atualizarCancelamento(n) {
+  const j = await notavia('GET', `/eventos/${encodeURIComponent(n.cancel_job_id)}`);
+  const set = (campos) => { const ks = Object.keys(campos); db.prepare(`UPDATE notas_fiscais SET ${ks.map((k) => k + '=?').join(',')}, atualizado_em=datetime('now','localtime') WHERE id=?`).run(...ks.map((k) => campos[k]), n.id); };
+  if (j.status === 'Falha') set({ cancel_status: 'falha', cancel_motivo: j.erro || 'Falha no cancelamento', cancel_resposta: JSON.stringify(j) });
+  else if (j.status === 'Concluido') {
+    const r = j.resultado || {};
+    if (['Rejeitada', 'Rejeitado', 'Denegada'].includes(r.status) || r.sucesso === false) set({ cancel_status: 'rejeitado', cancel_motivo: [r.cStat && `Código ${r.cStat}`, r.motivo || r.mensagem].filter(Boolean).join(': ') || 'A SEFAZ recusou o cancelamento.', cancel_resposta: JSON.stringify(j) });
+    else set({ status: 'cancelada', cancel_status: 'concluido', cancel_motivo: null, cancel_protocolo: r.protocolo || null, cancel_resposta: JSON.stringify(j), cancelada_em: horaLocal(j.processadoEmUtc) });
+  } else set({ cancel_status: mapStatusJob(j.status) || n.cancel_status, cancel_resposta: JSON.stringify(j) });
 }
 
 async function baixarArquivos(n) {
@@ -196,12 +244,13 @@ function agendar() {
   setInterval(async () => {
     if (!cfg().chave) return;
     const fila = db.prepare(`SELECT id FROM notas_fiscais WHERE (status IN ('pendente','processando') AND job_id IS NOT NULL AND criado_em >= datetime('now','localtime','-2 days'))
+      OR (cancel_status IN ('pendente','processando') AND cancel_job_id IS NOT NULL AND atualizado_em >= datetime('now','localtime','-2 days'))
       OR (status='autorizada' AND (xml_arquivo IS NULL OR danfe_arquivo IS NULL) AND tentativas < 60) ORDER BY id LIMIT 10`).all();
     for (const { id } of fila) { try { await atualizar(id); } catch (e) { /* tenta na próxima rodada */ } }
   }, 20000).unref();
 }
 
-const publica = (n) => n && ({ ...n, payload: undefined, resposta: undefined, status_txt: STATUS_TXT[n.status] || n.status, tem_xml: !!n.xml_arquivo, tem_danfe: !!n.danfe_arquivo });
+const publica = (n) => n && ({ ...n, payload: undefined, resposta: undefined, cancel_resposta: undefined, status_txt: STATUS_TXT[n.status] || n.status, tem_xml: !!n.xml_arquivo, tem_danfe: !!n.danfe_arquivo });
 
 function rotas(api, can) {
   api.get('/fiscal/notas', can('fiscal'), (req, res) => {
@@ -225,15 +274,22 @@ function rotas(api, can) {
   api.get('/fiscal/vendas/:id/previa', can('fiscal'), (req, res) => {
     const d = dadosVenda(Number(req.params.id));
     res.json({ pendencias: d.pend, ambiente: d.c.ambiente, valor: d.s.valor_venda, cliente: d.p && { nome: d.p.nome, cpf_cnpj: d.p.cpf_cnpj, cidade: d.p.cidade, uf: d.p.uf }, veiculo: { descricao: descricaoProduto(d.v), info: infoVeiculo(d.v), ncm: d.ncm },
-      pagamentos: d.pags.map((g) => ({ forma: g.forma, valor: g.valor, tpag: TPAG[g.forma] || '99' })), operacao: opDaVenda(d.c, d.v),
+      pagamentos: d.pags.map((g) => ({ forma: g.forma, valor: g.valor, tpag: TPAG[g.forma] || '99' })), operacao: opDaVenda(d.c, d.v), observacoes: obsUltima(d.s.id) ?? obsPadrao(d.s, d.v), observacoes_padrao: obsPadrao(d.s, d.v),
       notas: db.prepare('SELECT id,numero,serie,status,ambiente,criado_em,motivo FROM notas_fiscais WHERE venda_id=? ORDER BY id DESC').all(d.s.id).map((n) => ({ ...n, status_txt: STATUS_TXT[n.status] })) });
   });
-  api.post('/fiscal/vendas/:id/emitir', can('fiscal'), async (req, res, next) => { try { res.json(publica(await emitirVenda(Number(req.params.id), req.user.id))); } catch (e) { next(e); } });
+  api.post('/fiscal/vendas/:id/emitir', can('fiscal'), async (req, res, next) => {
+    try {
+      const o = req.body && req.body.observacoes;
+      if (o != null && String(o).length > 2000) throw bad('As observações podem ter no máximo 2000 caracteres.');
+      res.json(publica(await emitirVenda(Number(req.params.id), req.user.id, o == null ? null : String(o))));
+    } catch (e) { next(e); }
+  });
+  api.post('/fiscal/notas/:id/cancelar', can('fiscal'), async (req, res, next) => { try { res.json(publica(await cancelar(Number(req.params.id), (req.body || {}).justificativa, req.user.id))); } catch (e) { next(e); } });
   // arquivos: do disco; se ainda não baixou, busca na Notavia na hora
   const arquivo = (tipo) => async (req, res, next) => {
     try {
       let n = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(req.params.id);
-      if (!n || n.status !== 'autorizada' || !n.chave) return res.status(404).json({ error: 'A nota ainda não foi aprovada.' });
+      if (!n || !['autorizada', 'cancelada'].includes(n.status) || !n.chave) return res.status(404).json({ error: 'A nota ainda não foi aprovada.' });
       const campo = tipo === 'xml' ? 'xml_arquivo' : 'danfe_arquivo';
       if (!n[campo]) { await baixarArquivos(n); n = db.prepare('SELECT * FROM notas_fiscais WHERE id=?').get(n.id); }
       const f = path.join(DIR, path.basename(n[campo]));
@@ -299,4 +355,4 @@ function rotas(api, can) {
   api.get('/fiscal/notas/:id/danfe', can('fiscal'), arquivo('danfe'));
 }
 
-module.exports = { rotas, agendar, emitirVenda, atualizar, montarPedido, TPAG };
+module.exports = { rotas, agendar, emitirVenda, atualizar, cancelar, montarPedido, TPAG };

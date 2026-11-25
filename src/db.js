@@ -210,6 +210,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS notas_fiscais (
 );
 CREATE INDEX IF NOT EXISTS ix_nf_venda ON notas_fiscais(venda_id);
 CREATE INDEX IF NOT EXISTS ix_nf_status ON notas_fiscais(status);`);
+{ // cancelamento da NF-e (evento na SEFAZ; a venda não muda)
+  const cn = db.prepare('PRAGMA table_info(notas_fiscais)').all().map((c) => c.name);
+  for (const [c, t] of [['cancel_status', 'TEXT'], ['cancel_job_id', 'TEXT'], ['cancel_referencia', 'TEXT'], ['cancel_justificativa', 'TEXT'], ['cancel_motivo', 'TEXT'], ['cancel_protocolo', 'TEXT'], ['cancel_resposta', 'TEXT'], ['cancel_por', 'INTEGER'], ['cancelada_em', 'TEXT']])
+    if (!cn.includes(c)) db.exec(`ALTER TABLE notas_fiscais ADD COLUMN ${c} ${t}`);
+}
 { // dados fiscais extras: código IBGE do município do cliente e NCM próprio do veículo (opcional)
   const cp = db.prepare('PRAGMA table_info(pessoas)').all().map((c) => c.name);
   if (!cp.includes('municipio_ibge')) db.exec('ALTER TABLE pessoas ADD COLUMN municipio_ibge TEXT');
