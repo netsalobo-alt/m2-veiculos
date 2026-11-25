@@ -8,6 +8,7 @@ const FORMA = { '01': 'Dinheiro', '02': 'Cheque', '03': 'Cartão de crédito', '
 const situacao = (n) => `${pill(n.status_txt || n.status, COR[n.status] || '')}${n.ambiente === 'homologacao' ? ' <span class="pill warn" title="Emitida em homologação: sem valor fiscal">Teste</span>' : ''}`;
 const st = { mes: today().slice(0, 7), status: '', q: '' };
 let timer = null;
+const emCanc = (n) => ['pendente', 'processando'].includes(n.cancel_status);
 
 export async function list(view) {
   setCrumbs('Fiscal', 'NF-e');
@@ -33,15 +34,15 @@ export async function list(view) {
       { label: 'Destinatário', html: (n) => `${n.pessoa_id ? `<a class="linkbtn" href="#/pessoa/${n.pessoa_id}">${esc(n.destinatario || '')}</a>` : esc(n.destinatario || '')}${n.veiculo ? `<div class="t2">${esc(n.veiculo)}${n.placa ? ' · ' + esc(n.placa) : ''}</div>` : ''}` },
       { label: 'Natureza da operação', html: (n) => esc(n.natureza || '—') },
       { label: 'Valor', num: true, html: (n) => brl(n.valor) },
-      { label: 'Situação', html: (n) => `${situacao(n)}${['rejeitada', 'falha'].includes(n.status) && n.motivo ? `<div class="t2 neg" style="max-width:260px;white-space:normal">${esc(n.motivo).slice(0, 120)}</div>` : ''}` },
-      { label: 'Ações', cls: 'nowrap right', html: (n) => `<button class="btn sm ghost" data-ver="${n.id}" aria-label="Ver nota">${icon('list')}</button>${n.status === 'autorizada' ? ` <a class="btn sm ghost" href="/api/fiscal/notas/${n.id}/danfe" target="_blank" rel="noopener">DANFE</a> <a class="btn sm ghost" href="/api/fiscal/notas/${n.id}/xml">XML</a>` : ''}${['pendente', 'processando'].includes(n.status) ? ` <button class="btn sm ghost" data-at="${n.id}">Atualizar</button>` : ''}` },
+      { label: 'Situação', html: (n) => `${situacao(n)}${emCanc(n) ? ' <span class="pill info">Cancelando…</span>' : ''}${['rejeitada', 'falha'].includes(n.status) && n.motivo ? `<div class="t2 neg" style="max-width:260px;white-space:normal">${esc(n.motivo).slice(0, 120)}</div>` : ''}` },
+      { label: 'Ações', cls: 'nowrap right', html: (n) => `<button class="btn sm ghost" data-ver="${n.id}" aria-label="Ver nota">${icon('list')}</button>${['autorizada', 'cancelada'].includes(n.status) ? ` <a class="btn sm ghost" href="/api/fiscal/notas/${n.id}/danfe" target="_blank" rel="noopener">DANFE</a> <a class="btn sm ghost" href="/api/fiscal/notas/${n.id}/xml">XML</a>` : ''}${['pendente', 'processando'].includes(n.status) || emCanc(n) ? ` <button class="btn sm ghost" data-at="${n.id}">Atualizar</button>` : ''}` },
     ], rows, { empty: 'Nenhuma NF-e neste mês.' });
     view.querySelector('#tot').textContent = rows.length ? `${rows.length} nota(s) · ${brl(rows.filter((n) => n.status === 'autorizada').reduce((a, n) => a + (n.valor || 0), 0))} aprovadas` : '';
     view.querySelectorAll('[data-ver]').forEach((b) => (b.onclick = () => detalhe(Number(b.dataset.ver), load)));
     view.querySelectorAll('[data-at]').forEach((b) => (b.onclick = async () => { b.disabled = true; try { await post(`/fiscal/notas/${b.dataset.at}/atualizar`); await load(); } catch (e) { fail(e); b.disabled = false; } }));
     // enquanto houver nota na fila, atualiza sozinho
     clearTimeout(timer);
-    if (rows.some((n) => ['pendente', 'processando'].includes(n.status))) timer = setTimeout(() => { if (document.body.contains(view.querySelector('#lst'))) load().catch(() => {}); }, 5000);
+    if (rows.some((n) => ['pendente', 'processando'].includes(n.status) || emCanc(n))) timer = setTimeout(() => { if (document.body.contains(view.querySelector('#lst'))) load().catch(() => {}); }, 5000);
   };
   const re = () => load().catch(fail);
   view.querySelectorAll('[data-st]').forEach((b) => (b.onclick = () => { st.status = b.dataset.st; re(); }));
@@ -83,12 +84,20 @@ export async function emitirNotaVenda(vendaId, onDone) {
       </div>
       <p style="margin:14px 0 4px"><strong>${esc(p.veiculo.descricao)}</strong></p><p class="small muted" style="margin:0">${esc(p.veiculo.info || '')}</p>
       <p style="margin:14px 0 4px"><strong>Pagamentos</strong></p><p class="small" style="margin:0">${p.pagamentos.map((g) => `${esc(FORMA[g.tpag] || g.forma)} ${brl(g.valor)}`).join(' · ') || 'Sem formas de pagamento (vai como "Outros")'}</p>
+      <label style="display:block;margin-top:14px"><strong>Observações (informações complementares da nota)</strong>
+        <textarea name="observacoes" rows="4" maxlength="2000" style="width:100%;margin-top:6px">${esc(p.observacoes || '')}</textarea></label>
+      <div class="small muted" style="display:flex;justify-content:space-between;gap:8px"><span>Saem no campo "Informações complementares" do DANFE.</span><span><span data-cont></span>/2000 · <button type="button" class="linkbtn" data-padrao>Restaurar texto padrão</button></span></div>
       <p class="hint" style="margin-top:12px">Os impostos são calculados pela Notavia, conforme a matriz configurada pelo contador no portal dela.</p>
       ${p.notas.length ? `<p style="margin:12px 0 4px"><strong>Notas desta venda</strong></p>${p.notas.map((n) => `<div class="small">${n.numero ? 'Nº ' + n.numero + ' · ' : ''}${esc(n.status_txt)} · ${dth(n.criado_em)}${n.ambiente === 'homologacao' ? ' · teste' : ''}${n.motivo ? ` · <span class="neg">${esc(n.motivo).slice(0, 140)}</span>` : ''}</div>`).join('')}` : ''}`,
-    onOpen: (d) => { const b = d.querySelector('form [type=submit]'); if (b && bloqueia) { b.disabled = true; b.title = 'Resolva as pendências acima'; } },
-    onSubmit: async () => {
+    onOpen: (d) => {
+      const b = d.querySelector('form [type=submit]'); if (b && bloqueia) { b.disabled = true; b.title = 'Resolva as pendências acima'; }
+      const ta = d.querySelector('[name=observacoes]'), ct = d.querySelector('[data-cont]');
+      const conta = () => (ct.textContent = ta.value.length); ta.oninput = conta; conta();
+      d.querySelector('[data-padrao]').onclick = () => { ta.value = p.observacoes_padrao || ''; conta(); ta.focus(); };
+    },
+    onSubmit: async (f) => {
       if (bloqueia) return false;
-      const n = await post(`/fiscal/vendas/${vendaId}/emitir`);
+      const n = await post(`/fiscal/vendas/${vendaId}/emitir`, { observacoes: f.observacoes || '' });
       toast('NF-e enviada à SEFAZ. Aguardando aprovação…');
       onDone && onDone();
       detalhe(n.id, onDone);
@@ -105,6 +114,9 @@ export async function detalhe(id, onChange) {
     m.el.querySelector('.dialog-top h2').textContent = n.numero ? `NF-e nº ${n.numero} (série ${n.serie ?? '–'})` : 'NF-e';
     m.el.querySelector('#nfd').innerHTML = `<p style="margin:0 0 12px">${situacao(n)}${['pendente', 'processando'].includes(n.status) ? ' <span class="muted small">atualizando sozinho…</span>' : ''}</p>
       ${n.motivo ? `<div class="alert" style="margin-bottom:12px;${['rejeitada', 'falha'].includes(n.status) ? 'border-color:var(--danger)' : ''}">${n.cstat ? `<strong>Código ${n.cstat}:</strong> ` : ''}${esc(n.motivo)}</div>` : ''}
+      ${n.status === 'cancelada' ? `<div class="alert" style="margin-bottom:12px"><strong>NF-e cancelada${n.cancelada_em ? ' em ' + dth(n.cancelada_em) : ''}.</strong> A venda continua registrada; se precisar, emita uma nova nota pela venda.${n.cancel_justificativa ? `<div class="small" style="margin-top:4px">Justificativa: ${esc(n.cancel_justificativa)}</div>` : ''}${n.cancel_protocolo ? `<div class="small">Protocolo do cancelamento: ${esc(n.cancel_protocolo)}</div>` : ''}</div>` : ''}
+      ${emCanc(n) ? '<div class="alert info" style="margin-bottom:12px"><strong>Cancelamento enviado à SEFAZ.</strong> <span class="muted small">atualizando sozinho…</span></div>' : ''}
+      ${n.status === 'autorizada' && ['falha', 'rejeitado'].includes(n.cancel_status) ? `<div class="alert" style="margin-bottom:12px;border-color:var(--danger)"><strong>O cancelamento não foi aceito:</strong> ${esc(n.cancel_motivo || '')}<div class="small muted" style="margin-top:4px">A nota continua aprovada.</div></div>` : ''}
       <div class="grid g2"><div>
         <div class="kv"><span>Destinatário</span><strong>${esc(n.destinatario || '—')}</strong></div><div class="kv"><span>CPF/CNPJ</span><strong>${esc(n.cpf_cnpj || '—')}</strong></div>
         <div class="kv"><span>Veículo</span><strong>${esc(n.veiculo || '—')}${n.placa ? ' · ' + esc(n.placa) : ''}</strong></div><div class="kv"><span>Valor</span><strong>${brl(n.valor)}</strong></div>
@@ -115,26 +127,49 @@ export async function detalhe(id, onChange) {
       ${n.chave ? `<div class="kv"><span>Chave de acesso</span><strong style="font-family:monospace;font-size:12px;word-break:break-all">${esc(n.chave)}</strong></div><div class="kv"><span>Protocolo</span><strong>${esc(n.protocolo || '—')}</strong></div>` : ''}
       <div class="kv"><span>Referência</span><strong class="small">${esc(n.referencia)}</strong></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
-        ${n.status === 'autorizada' ? `<a class="btn" href="/api/fiscal/notas/${n.id}/danfe" target="_blank" rel="noopener">${icon('pdf')}Abrir DANFE</a><a class="btn ghost" href="/api/fiscal/notas/${n.id}/xml">Baixar XML</a>` : ''}
-        ${['pendente', 'processando'].includes(n.status) ? '<button class="btn ghost" data-at>Atualizar agora</button>' : ''}
+        ${['autorizada', 'cancelada'].includes(n.status) ? `<a class="btn" href="/api/fiscal/notas/${n.id}/danfe" target="_blank" rel="noopener">${icon('pdf')}Abrir DANFE</a><a class="btn ghost" href="/api/fiscal/notas/${n.id}/xml">Baixar XML</a>` : ''}
+        ${n.status === 'autorizada' && !emCanc(n) ? '<button class="btn ghost" data-cnf style="color:var(--danger)">Cancelar nota</button>' : ''}
+        ${['pendente', 'processando'].includes(n.status) || emCanc(n) ? '<button class="btn ghost" data-at>Atualizar agora</button>' : ''}
         ${['rejeitada', 'falha'].includes(n.status) && n.venda_id ? '<button class="btn" data-de>Corrigir e emitir de novo</button>' : ''}
         ${n.venda_id ? `<a class="btn ghost" href="#/venda/${n.venda_id}">Ver venda #${n.venda_id}</a>` : ''}
       </div>
       ${n.pedido ? `<details style="margin-top:14px"><summary class="muted small" style="cursor:pointer">Dados enviados à Notavia</summary><pre style="white-space:pre-wrap;font-size:11.5px;background:#f6f6f8;padding:10px;border-radius:8px;max-height:260px;overflow:auto">${esc(JSON.stringify(n.pedido, null, 2))}</pre></details>` : ''}`;
     const at = m.el.querySelector('[data-at]'); if (at) at.onclick = () => atualizar().catch(fail);
+    const cb = m.el.querySelector('[data-cnf]'); if (cb) cb.onclick = () => cancelarNota(n, async () => { n = { ...n, ...(await get(`/fiscal/notas/${id}`)) }; desenhar(); onChange && onChange(); agenda(); });
     const de = m.el.querySelector('[data-de]'); if (de) de.onclick = () => { m.close(); emitirNotaVenda(n.venda_id, onChange).catch(fail); };
   };
   const atualizar = async () => {
-    const antes = n.status;
+    const antes = n.status, antesC = n.cancel_status;
     const r = await post(`/fiscal/notas/${id}/atualizar`);
     n = { ...n, ...r };
     desenhar();
-    if (r.status !== antes) { onChange && onChange(); if (r.status === 'autorizada') toast(`NF-e nº ${r.numero} aprovada.`); else if (['rejeitada', 'falha'].includes(r.status)) toast('A NF-e não foi aprovada. Veja o motivo.', true); }
+    if (r.cancel_status !== antesC) { onChange && onChange(); if (r.status === 'cancelada') toast('NF-e cancelada. A venda não foi alterada.'); else if (['falha', 'rejeitado'].includes(r.cancel_status)) toast('O cancelamento não foi aceito. Veja o motivo.', true); }
+    else if (r.status !== antes) { onChange && onChange(); if (r.status === 'autorizada') toast(`NF-e nº ${r.numero} aprovada.`); else if (['rejeitada', 'falha'].includes(r.status)) toast('A NF-e não foi aprovada. Veja o motivo.', true); }
     agenda();
   };
-  const agenda = () => { clearTimeout(t); if (['pendente', 'processando'].includes(n.status) && m.el.isConnected) t = setTimeout(() => atualizar().catch(() => agenda()), 3000); };
+  const agenda = () => { clearTimeout(t); if ((['pendente', 'processando'].includes(n.status) || emCanc(n)) && m.el.isConnected) t = setTimeout(() => atualizar().catch(() => agenda()), 3000); };
   m.el.addEventListener('close', () => clearTimeout(t));
   desenhar(); agenda();
+}
+
+// cancelamento só da nota fiscal (a venda continua como está)
+function cancelarNota(n, onDone) {
+  const horas = n.autorizada_em ? (Date.now() - new Date(n.autorizada_em.replace(' ', 'T')).getTime()) / 36e5 : 0;
+  modal({
+    title: `Cancelar NF-e${n.numero ? ' nº ' + n.numero : ''}`, submitLabel: 'Confirmar cancelamento',
+    body: `<div class="alert info" style="margin-top:0;margin-bottom:12px">Cancela <strong>só a nota fiscal</strong> na SEFAZ. A venda, o estoque e o financeiro <strong>não mudam</strong>. Depois, se precisar, emita uma nova NF-e pela venda.</div>
+      ${horas > 24 ? '<div class="alert" style="margin-bottom:12px;border-color:var(--danger)"><strong>Atenção:</strong> a nota foi aprovada há mais de 24 h. Pela regra da SEFAZ o cancelamento costuma ser recusado depois desse prazo; nesse caso, fale com o contador (pode ser preciso uma nota de devolução).</div>' : ''}
+      <label>Justificativa (mínimo 15 caracteres)<textarea name="justificativa" rows="3" minlength="15" maxlength="255" required placeholder="Ex.: Nota emitida com dados do cliente incorretos" style="width:100%;margin-top:6px"></textarea></label>
+      <div class="small muted" style="text-align:right"><span data-cj>0</span>/255</div>`,
+    onOpen: (d) => { d.querySelector('.form-actions [data-cancel]').textContent = 'Voltar'; const ta = d.querySelector('[name=justificativa]'), c = d.querySelector('[data-cj]'); ta.oninput = () => (c.textContent = ta.value.trim().length); },
+    onSubmit: async (f) => {
+      const j = String(f.justificativa || '').trim();
+      if (j.length < 15) throw new Error('A justificativa precisa ter pelo menos 15 caracteres.');
+      await post(`/fiscal/notas/${n.id}/cancelar`, { justificativa: j });
+      toast('Cancelamento enviado à SEFAZ. Aguardando resposta…');
+      onDone && onDone();
+    },
+  });
 }
 
 // ------------------------------------------------------------------ operações fiscais (na Notavia, gerenciadas por aqui)
